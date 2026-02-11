@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tokio::{fs::File, io::AsyncReadExt};
 
@@ -30,7 +30,7 @@ impl BackupSettings {
     }
 }
 
-pub async fn load_config(path: &Path) -> Result<BackupConfig> {
+async fn load_config_from_file(path: &Path) -> Result<BackupConfig> {
     let mut file = File::open(path)
         .await
         .with_context(|| format!("Failed to open config file: {}", path.display()))?;
@@ -43,17 +43,19 @@ pub async fn load_config(path: &Path) -> Result<BackupConfig> {
 }
 
 /// Load configuration from a file in the same directory as the executable
-pub async fn load_config_from_file() -> Result<BackupConfig> {
+pub async fn load_config() -> Result<BackupConfig> {
     // Get the path to the current executable
-    let exe_path = std::env::current_exe().context("Failed to get executable path")?;
+    // let exe_path = std::env::current_exe().context("Failed to get executable path")?;
+
+    let home_path = std::env::home_dir().context("Failed to find Home dir")?;
 
     // Construct path to config.json in the same directory
-    let config_path = exe_path
-        .parent()
-        .context("Failed to get executable directory")?
+    let config_path = PathBuf::from(home_path)
+        .join(".config")
+        .join("blazebackup")
         .join("config.json");
 
-    load_config(&config_path).await
+    load_config_from_file(&config_path).await
 }
 
 #[cfg(test)]
@@ -116,7 +118,7 @@ mod tests {
         temp_file.write_all(json.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let config = load_config(temp_file.path()).await.unwrap();
+        let config = load_config_from_file(temp_file.path()).await.unwrap();
         assert_eq!(config.backups.len(), 1);
         assert_eq!(config.backups[0].name, "test_backup");
         assert_eq!(config.backups[0].output_filename(), "docs.zip");
@@ -125,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_config_missing_file() {
         let nonexistent = Path::new("/nonexistent/path/config.json");
-        let result = load_config(nonexistent).await;
+        let result = load_config_from_file(nonexistent).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to open config file"));
@@ -139,7 +141,7 @@ mod tests {
         temp_file.write_all(json.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let result = load_config(temp_file.path()).await;
+        let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to parse config.json"));
@@ -163,7 +165,7 @@ mod tests {
         temp_file.write_all(json.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let result = load_config(temp_file.path()).await;
+        let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to parse config.json"));
@@ -177,7 +179,7 @@ mod tests {
         temp_file.write_all(json.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let result = load_config(temp_file.path()).await;
+        let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Failed to parse config.json"));
@@ -209,7 +211,7 @@ mod tests {
         temp_file.write_all(json.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
-        let config = load_config(temp_file.path()).await.unwrap();
+        let config = load_config_from_file(temp_file.path()).await.unwrap();
         assert_eq!(config.backups.len(), 2);
         assert_eq!(config.backups[0].name, "backup1");
         assert_eq!(config.backups[1].name, "backup2");

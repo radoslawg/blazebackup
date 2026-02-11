@@ -1,4 +1,4 @@
-use crate::config::BackupConfig;
+use crate::config::load_config;
 use anyhow::Result;
 use dotenv::dotenv;
 use sevenz_rust2::{self, encoder_options};
@@ -23,49 +23,11 @@ pub fn compress_sources(destination: String, sources: Vec<String>, password: Str
     Ok(())
 }
 
-/// The `#[tokio::main]` attribute is used to make the `main` function an asynchronous entry point.
-/// `tokio` is a popular asynchronous runtime for Rust, enabling non-blocking I/O operations,
-/// which are essential for network requests like interacting with S3.
-/// `async fn main()` declares an asynchronous main function.
-/// `-> Result<()>` now uses `anyhow::Result` for more flexible error handling.
-/// It indicates that the function will either return successfully (`Ok(())`) or
-/// return an `anyhow::Error`.
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load environment variables from the `.env` file.
-    // `.ok()` converts the Result into an Option, and if there's an error (e.g., no .env file),
-    // it will be ignored, and the program will continue. This is common for optional config files.
     dotenv().ok();
 
-    let test_json = r#"
-        {
-  "backups": [
-  {
-    "name": "my-backup",
-    "sources": ["c:/bin"],
-    "output": "d:/temp",
-    "output_filename": "dupa.7z"
-  },
-  {
-    "name": "configs",
-    "sources": ["c:/Users/Administrator/.config/"],
-    "output": "d:/temp",
-    "output_filename": "dupa2.7z"
-  },
-  {
-    "name": "obsidian",
-    "sources": ["d:/Obsidian/"],
-    "output": "d:/temp",
-    "output_filename": "obsidian.7z"
-  }
-  ],
-  "storage": {
-    "bucket": "radoslawg-Backups",
-    "key_prefix": "backups/"
-  }
-}
-        "#;
-    let config = serde_json::from_str::<BackupConfig>(test_json)?;
+    let config = load_config().await?;
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
