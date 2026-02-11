@@ -1,0 +1,29 @@
+{
+  "backups": [
+    {
+      "name": "my-backup",
+      "sources": ["c:/bin"],
+      "output": "d:/temp",
+      "output_filename": "dupa.7z",
+      "password": "pass123"
+    },
+    {
+      "name": "configs",
+      "sources": ["c:/Users/Administrator/.config/"],
+      "output": "d:/temp",
+      "output_filename": "dupa2.7z",
+      "password": ""
+    },
+    {
+      "name": "obsidian",
+      "sources": ["d:/Obsidian/"],
+      "output": "d:/temp",
+      "output_filename": "obsidian.7z",
+      "password": ""
+    }
+  ],
+  "storage": {
+    "bucket": "radoslawg-Backups",
+    "key_prefix": "backups/"
+  }
+}

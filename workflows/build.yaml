@@ -1,0 +1,35 @@
+name: Build
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build project
+        run: cargo build
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Run coverage
+        run: cargo tarpaulin --out Html --engine llvm
+
+      - name: Upload coverage report
+        uses: https://github.com/christopherHX/gitea-upload-artifact@v4
+        with:
+          name: coverage-report
+          path: tarpaulin-report.html

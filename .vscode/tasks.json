@@ -1,0 +1,36 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Rust: Build",
+            "type": "shell",
+            "command": "cargo build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "detail": "Builds the Rust application"
+        },
+        {
+            "label": "Rust: Run",
+            "type": "shell",
+            "command": "cargo run",
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "detail": "Runs the Rust application"
+        }
+    ]
+}
