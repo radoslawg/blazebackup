@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     let mut tasks = JoinSet::new();
     for b in config.backups {
         let mut dest = PathBuf::from(&b.output);
-        dest.push(b.output_filename());
+        dest.push(b.output_filename().unwrap());
         let dest = dest.into_os_string().into_string().unwrap();
         let sources = b.sources;
         let password = zip_password.clone();

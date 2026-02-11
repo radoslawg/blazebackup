@@ -25,8 +25,11 @@ struct StorageSettings {
 }
 
 impl BackupSettings {
-    pub fn output_filename(&self) -> String {
-        self.output_filename.clone()
+    pub fn output_filename(&self) -> Result<PathBuf, &'static str> {
+        if self.output.is_empty() || self.output_filename.is_empty() {
+            return Err("Cannot create Path! output or output_filename is empty!");
+        }
+        return Ok(PathBuf::from(&self.output).join(&self.output_filename));
     }
 }
 
@@ -72,7 +75,14 @@ mod tests {
             output: "/tmp".to_string(),
             output_filename: "backup.zip".to_string(),
         };
-        assert_eq!(settings.output_filename(), "backup.zip");
+        assert_eq!(
+            settings.output_filename().unwrap().parent().unwrap(),
+            "/tmp"
+        );
+        assert_eq!(
+            settings.output_filename().unwrap().file_name().unwrap(),
+            "backup.zip"
+        );
     }
 
     #[test]
@@ -83,7 +93,7 @@ mod tests {
             output: "/tmp".to_string(),
             output_filename: "".to_string(),
         };
-        assert_eq!(settings.output_filename(), "");
+        assert!(settings.output_filename().is_err());
     }
 
     #[test]
@@ -94,7 +104,14 @@ mod tests {
             output: "/tmp".to_string(),
             output_filename: "backup_2024-01-15@14:30:00.zip".to_string(),
         };
-        assert_eq!(settings.output_filename(), "backup_2024-01-15@14:30:00.zip");
+        assert_eq!(
+            settings.output_filename().unwrap().parent().unwrap(),
+            "/tmp"
+        );
+        assert_eq!(
+            settings.output_filename().unwrap().file_name().unwrap(),
+            "backup_2024-01-15@14:30:00.zip"
+        );
     }
 
     #[tokio::test]
@@ -121,7 +138,14 @@ mod tests {
         let config = load_config_from_file(temp_file.path()).await.unwrap();
         assert_eq!(config.backups.len(), 1);
         assert_eq!(config.backups[0].name, "test_backup");
-        assert_eq!(config.backups[0].output_filename(), "docs.zip");
+        assert_eq!(
+            config.backups[0]
+                .output_filename()
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "docs.zip"
+        );
     }
 
     #[tokio::test]
