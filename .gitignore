@@ -64,3 +64,4 @@ $RECYCLE.BIN/
 *.lnk
 
 .env
+/AGENTS.md
