@@ -1,10 +1,13 @@
 use crate::config::load_config;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dotenv::dotenv;
-use sevenz_rust2::{self, encoder_options};
+use sevenz_rust2::encoder_options;
+use simplehash::fnv::Fnv1aHasher64;
+use std::hash::Hasher;
 use std::path::PathBuf;
-use tokio;
+use std::time::UNIX_EPOCH;
 use tokio::task::JoinSet;
+use walkdir::WalkDir;
 
 mod buckets;
 mod config;
@@ -23,6 +26,30 @@ pub fn compress_sources(destination: String, sources: Vec<String>, password: Str
     Ok(())
 }
 
+pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
+    let mut hasher = Fnv1aHasher64::new();
+
+    let mut sorted_paths = Vec::from(paths);
+    sorted_paths.sort();
+
+    for p in sorted_paths {
+        let walkdir = WalkDir::new(&p);
+        for dir in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
+            let udir = dir.context("Failed to access directory entyr during hash calculation")?;
+            if udir.file_type().is_file() {
+                let modified = udir
+                    .metadata()?
+                    .modified()?
+                    .duration_since(UNIX_EPOCH)?
+                    .as_secs();
+                hasher.write(&modified.to_ne_bytes());
+                hasher.write(udir.path().as_os_str().as_encoded_bytes());
+            }
+        }
+    }
+    Ok(format!("{:x}", hasher.finish_raw()))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
@@ -35,11 +62,16 @@ async fn main() -> Result<()> {
     };
 
     let mut tasks = JoinSet::new();
-    for b in config.backups {
+    for b in config.backups.iter() {
+        let sources = b.sources.clone();
+        println!(
+            "source: {:?}, hash: {:?}",
+            sources,
+            calculate_directory_hash(&sources)
+        );
         let mut dest = PathBuf::from(&b.output);
         dest.push(b.output_filename().unwrap());
         let dest = dest.into_os_string().into_string().unwrap();
-        let sources = b.sources;
         let password = zip_password.clone();
         tasks.spawn_blocking(move || compress_sources(dest, sources, password));
     }
