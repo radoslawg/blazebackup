@@ -3,9 +3,13 @@ use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
+use std::fs;
 use std::hash::Hasher;
+use std::io::Write; // Essential for File::write_all and File::flush
+use std::os::windows::fs::MetadataExt; // Essential for file_size() on Windows
 use std::path::PathBuf;
-use std::time::UNIX_EPOCH;
+use std::thread::sleep;
+use std::time::{Duration, UNIX_EPOCH};
 use tokio::task::JoinSet;
 use walkdir::WalkDir;
 
@@ -35,14 +39,14 @@ pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
     for p in sorted_paths {
         let walkdir = WalkDir::new(&p);
         for dir in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
-            let udir = dir.context("Failed to access directory entyr during hash calculation")?;
+            let udir = dir.context("Failed to access directory entry during hash calculation")?;
             if udir.file_type().is_file() {
-                let modified = udir
-                    .metadata()?
-                    .modified()?
-                    .duration_since(UNIX_EPOCH)?
-                    .as_secs();
+                let metadata = udir.metadata()?;
+                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
+                let file_size = metadata.file_size(); // Requires MetadataExt on Windows
+
                 hasher.write(&modified.to_ne_bytes());
+                hasher.write(&file_size.to_ne_bytes());
                 hasher.write(udir.path().as_os_str().as_encoded_bytes());
             }
         }
@@ -85,3 +89,169 @@ async fn main() -> Result<()> {
 
     Ok(()) // Indicate successful execution of the main function.
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // Helper function to create a file with known content and timestamp
+    fn create_test_file(path: &PathBuf, content: &str, wait_ms: u64) -> Result<()> {
+        let mut file = fs::File::create(path)?;
+        file.write_all(content.as_bytes())?;
+        // Sleep to ensure modification time is distinct, if necessary for testing
+        sleep(Duration::from_millis(wait_ms));
+        file.flush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_is_deterministic_for_identical_files() -> Result<()> {
+        let dir = tempdir()?;
+        let path1 = dir.path().join("file1.txt");
+        let path2 = dir.path().join("file1.txt");
+
+        create_test_file(&PathBuf::from(&path1), "test content", 50)?;
+
+        let hash1 = calculate_directory_hash(&[path1.to_str().unwrap().to_string()])?;
+        sleep(Duration::from_millis(50)); // Wait a bit before creating the second hash
+        let hash2 = calculate_directory_hash(&[path2.to_str().unwrap().to_string()])?;
+
+        assert_eq!(
+            hash1, hash2,
+            "Hashes should be identical for the same file state."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_changes_on_modification_time() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("time_test.txt");
+
+        create_test_file(&PathBuf::from(&path), "initial content", 10)?; // Initial creation
+        let hash1 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+
+        sleep(Duration::from_millis(500)); // INCREASED SLEEP TIME for reliability
+
+        // Modify the file, which changes modification time
+        let mut file = fs::File::create(&path)?;
+        file.write_all(b"initial content")?; // Write the same content, but this updates mtime
+        file.flush()?;
+
+        let hash2 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+
+        assert_ne!(
+            hash1, hash2,
+            "Hash should change when modification time changes."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_changes_on_file_size() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("size_test.txt");
+
+        create_test_file(&PathBuf::from(&path), "small", 10)?;
+        let hash1 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+
+        sleep(Duration::from_millis(50)); // Wait to ensure mtime is different
+
+        // Modify the file, which changes content and size
+        let mut file = fs::File::create(&path)?;
+        file.write_all(b"much larger content")?;
+        file.flush()?;
+
+        let hash2 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+
+        assert_ne!(hash1, hash2, "Hash should change when file size changes.");
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_changes_on_path_name() -> Result<()> {
+        let dir = tempdir()?;
+        let path1 = dir.path().join("a.txt");
+        let path2 = dir.path().join("b.txt");
+
+        create_test_file(&PathBuf::from(&path1), "content", 10)?;
+        let hash1 = calculate_directory_hash(&[path1.to_str().unwrap().to_string()])?;
+
+        sleep(Duration::from_millis(50));
+
+        // Rename the file - this tests the path being written to the hasher
+        fs::rename(&path1, &path2)?;
+        let hash2 = calculate_directory_hash(&[path2.to_str().unwrap().to_string()])?;
+
+        assert_ne!(hash1, hash2, "Hash should change when file path changes.");
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_is_deterministic_for_multiple_sorted_paths() -> Result<()> {
+        let dir = tempdir()?;
+        let path_a = dir.path().join("a.txt");
+        let path_b = dir.path().join("b.txt");
+
+        // Create files in reverse order of processing
+        create_test_file(&PathBuf::from(&path_b), "content b", 50)?;
+        sleep(Duration::from_millis(50));
+        create_test_file(&PathBuf::from(&path_a), "content a", 50)?;
+
+        // Run hash with paths sorted alphabetically in the input vector
+        let paths_sorted_input = vec![
+            path_a.to_str().unwrap().to_string(),
+            path_b.to_str().unwrap().to_string(),
+        ];
+        let hash1 = calculate_directory_hash(&paths_sorted_input)?;
+
+        // Run hash with paths in reverse order in the input vector
+        let paths_reverse_input = vec![
+            path_b.to_str().unwrap().to_string(),
+            path_a.to_str().unwrap().to_string(),
+        ];
+        let hash2 = calculate_directory_hash(&paths_reverse_input)?;
+
+        assert_eq!(
+            hash1, hash2,
+            "Hashes must be identical because the internal logic sorts the paths."
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_includes_all_files_in_walked_directory() -> Result<()> {
+        let root_dir = tempdir()?;
+        let hash_target_dir = root_dir.path().join("target");
+        fs::create_dir(&hash_target_dir)?;
+
+        // File that will be included in the hash
+        create_test_file(&hash_target_dir.join("file_A.txt"), "A", 10)?;
+        let hash1 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+
+        // File outside the hashed directory structure (in the root temp dir)
+        let unrelated_file = root_dir.path().join("unrelated.txt");
+        create_test_file(&PathBuf::from(&unrelated_file), "unrelated", 10)?;
+
+        // Hash again without touching the target directory content
+        let hash2 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+
+        assert_eq!(
+            hash1, hash2,
+            "Hash should be identical when only an external, untracked file is added to the parent temporary directory."
+        );
+
+        // Now modify the file *inside* the hashed directory
+        create_test_file(&hash_target_dir.join("file_A.txt"), "A changed", 10)?;
+        let hash3 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+
+        assert_ne!(
+            hash1, hash3,
+            "Hash must change when content inside the hashed directory changes."
+        );
+        Ok(())
+    }
+}
+
