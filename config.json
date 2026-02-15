@@ -2,24 +2,24 @@
   "backups": [
     {
       "name": "my-backup",
-      "sources": ["c:/bin"],
-      "output": "d:/temp",
-      "output_filename": "dupa.7z",
-      "password": "pass123"
+      "sources": [
+        "c:/bin"
+      ],
+      "output_filename": "{name}-{timestamp}.7z"
     },
     {
       "name": "configs",
-      "sources": ["c:/Users/Administrator/.config/"],
-      "output": "d:/temp",
-      "output_filename": "dupa2.7z",
-      "password": ""
+      "sources": [
+        "c:/Users/Administrator/.config/"
+      ],
+      "output_filename": "{name}-{timestamp}.7z"
     },
     {
       "name": "obsidian",
-      "sources": ["d:/Obsidian/"],
-      "output": "d:/temp",
-      "output_filename": "obsidian.7z",
-      "password": ""
+      "sources": [
+        "d:/Obsidian/"
+      ],
+      "output_filename": "{name}-{timestamp}.7z"
     }
   ],
   "storage": {
@@ -27,3 +27,4 @@
     "key_prefix": "backups/"
   }
 }
+

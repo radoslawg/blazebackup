@@ -4,7 +4,7 @@ use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
 use std::hash::Hasher;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tokio::task::JoinSet;
 use walkdir::WalkDir;
@@ -12,8 +12,8 @@ use walkdir::WalkDir;
 mod buckets;
 mod config;
 
-pub fn compress_sources(destination: String, sources: Vec<String>, password: String) -> Result<()> {
-    println!("Compressing: {}", destination);
+pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
+    println!("Compressing: {:?}", destination);
     let mut writer = sevenz_rust2::ArchiveWriter::create(destination).expect("create writer ok");
     writer.set_content_methods(vec![
         encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
         Ok(pass) => String::from(pass.trim()),
         Err(_) => String::from(""),
     };
+    let compression_path = std::env::var("COMPRESSION_DIR").unwrap_or(String::from("d:/temp"));
 
     let mut tasks = JoinSet::new();
     for b in config.backups.iter() {
@@ -69,11 +70,11 @@ async fn main() -> Result<()> {
             sources,
             calculate_directory_hash(&sources)
         );
-        let mut dest = PathBuf::from(&b.output);
-        dest.push(b.output_filename().unwrap());
-        let dest = dest.into_os_string().into_string().unwrap();
+        let dest = b
+            .output_filename(&compression_path)
+            .context("Cannot construct output path!")?;
         let password = zip_password.clone();
-        tasks.spawn_blocking(move || compress_sources(dest, sources, password));
+        tasks.spawn_blocking(move || compress_sources(dest.as_path(), sources, password));
     }
     while let Some(res) = tasks.join_next().await {
         res??;

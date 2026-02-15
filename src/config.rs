@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::Local;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,6 @@ pub struct BackupConfig {
 pub struct BackupSettings {
     name: String,
     pub sources: Vec<String>,
-    pub output: String,
     output_filename: String,
 }
 
@@ -26,16 +25,16 @@ struct StorageSettings {
 }
 
 impl BackupSettings {
-    pub fn output_filename(&self) -> Result<PathBuf, &'static str> {
-        if self.output.is_empty() || self.output_filename.is_empty() {
-            return Err("Cannot create Path! output or output_filename is empty!");
+    pub fn output_filename(&self, output_dir: &String) -> Result<PathBuf> {
+        if output_dir.is_empty() || self.output_filename.is_empty() {
+            bail!("Cannot create Path! output or output_filename is empty!");
         }
         let temp_filename = self.output_filename.replace("{name}", &self.name).replace(
             "{timestamp}",
             Local::now().format("%Y%m%d-%H%M%S").to_string().as_str(),
         );
 
-        return Ok(PathBuf::from(&self.output).join(temp_filename));
+        return Ok(PathBuf::from(&output_dir).join(temp_filename));
     }
 }
 
@@ -78,15 +77,23 @@ mod tests {
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec!["src".to_string()],
-            output: "/tmp".to_string(),
+
             output_filename: "backup.zip".to_string(),
         };
         assert_eq!(
-            settings.output_filename().unwrap().parent().unwrap(),
+            settings
+                .output_filename(&"/tmp".to_string())
+                .unwrap()
+                .parent()
+                .unwrap(),
             "/tmp"
         );
         assert_eq!(
-            settings.output_filename().unwrap().file_name().unwrap(),
+            settings
+                .output_filename(&"/tmp".to_string())
+                .unwrap()
+                .file_name()
+                .unwrap(),
             "backup.zip"
         );
     }
@@ -96,10 +103,10 @@ mod tests {
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "".to_string(),
         };
-        assert!(settings.output_filename().is_err());
+        assert!(settings.output_filename(&"/tmp".to_string()).is_err());
     }
 
     #[test]
@@ -107,15 +114,23 @@ mod tests {
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "backup_2024-01-15@14:30:00.zip".to_string(),
         };
         assert_eq!(
-            settings.output_filename().unwrap().parent().unwrap(),
+            settings
+                .output_filename(&"/tmp".to_string())
+                .unwrap()
+                .parent()
+                .unwrap(),
             "/tmp"
         );
         assert_eq!(
-            settings.output_filename().unwrap().file_name().unwrap(),
+            settings
+                .output_filename(&"/tmp".to_string())
+                .unwrap()
+                .file_name()
+                .unwrap(),
             "backup_2024-01-15@14:30:00.zip"
         );
     }
@@ -125,10 +140,10 @@ mod tests {
         let settings = BackupSettings {
             name: "testname".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "backup_{name}_{timestamp}.7z".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         // Verify pattern: backup_testname_YYYYMMDD-HHMMSS.7z
         assert!(filename.starts_with("backup_testname_"));
@@ -150,10 +165,10 @@ mod tests {
         let settings = BackupSettings {
             name: "mybackup".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "{name}.zip".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         assert_eq!(result.file_name().unwrap(), "mybackup.zip");
     }
 
@@ -162,10 +177,10 @@ mod tests {
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "backup_{timestamp}.zip".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("backup_"));
         assert!(filename.ends_with(".zip"));
@@ -182,10 +197,10 @@ mod tests {
         let settings = BackupSettings {
             name: "prod".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "{name}_{name}_{timestamp}_{name}.zip".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("prod_prod_"));
         assert!(filename.ends_with("_prod.zip"));
@@ -196,10 +211,10 @@ mod tests {
         let settings = BackupSettings {
             name: "".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "{name}_{timestamp}.zip".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with('_')); // Empty name results in leading underscore
     }
@@ -209,10 +224,10 @@ mod tests {
         let settings = BackupSettings {
             name: "my-backup_v1.2".to_string(),
             sources: vec![],
-            output: "/tmp".to_string(),
+
             output_filename: "{name}.zip".to_string(),
         };
-        let result = settings.output_filename().unwrap();
+        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
         assert_eq!(result.file_name().unwrap(), "my-backup_v1.2.zip");
     }
 
@@ -223,7 +238,7 @@ mod tests {
                 {
                     "name": "test_backup",
                     "sources": ["/home/user/docs"],
-                    "output": "/tmp",
+
                     "output_filename": "docs.zip"
                 }
             ],
@@ -242,7 +257,7 @@ mod tests {
         assert_eq!(config.backups[0].name, "test_backup");
         assert_eq!(
             config.backups[0]
-                .output_filename()
+                .output_filename(&"/tmp".to_string())
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -318,13 +333,13 @@ mod tests {
                 {
                     "name": "backup1",
                     "sources": ["/path/1"],
-                    "output": "/out1",
+
                     "output_filename": "file1.zip"
                 },
                 {
                     "name": "backup2",
                     "sources": ["/path/2a", "/path/2b"],
-                    "output": "/out2",
+
                     "output_filename": "file2.zip"
                 }
             ],
