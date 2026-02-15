@@ -129,12 +129,13 @@ mod tests {
         create_test_file(&PathBuf::from(&path), "initial content", 10)?; // Initial creation
         let hash1 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
 
-        sleep(Duration::from_millis(500)); // INCREASED SLEEP TIME for reliability
+        sleep(Duration::from_millis(200)); // INCREASED SLEEP TIME for reliability
 
         // Modify the file, which changes modification time
         let mut file = fs::File::create(&path)?;
         file.write_all(b"initial content")?; // Write the same content, but this updates mtime
         file.flush()?;
+        sleep(Duration::from_millis(500)); // INCREASED SLEEP TIME for reliability
 
         let hash2 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
 
