@@ -3,13 +3,9 @@ use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
-use std::fs;
 use std::hash::Hasher;
-use std::io::Write; // Essential for File::write_all and File::flush
-use std::os::windows::fs::MetadataExt; // Essential for file_size() on Windows
 use std::path::PathBuf;
-use std::thread::sleep;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use tokio::task::JoinSet;
 use walkdir::WalkDir;
 
@@ -43,7 +39,7 @@ pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
             if udir.file_type().is_file() {
                 let metadata = udir.metadata()?;
                 let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
-                let file_size = metadata.file_size(); // Requires MetadataExt on Windows
+                let file_size = metadata.len();
 
                 hasher.write(&modified.to_ne_bytes());
                 hasher.write(&file_size.to_ne_bytes());
@@ -93,7 +89,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, io::Write, thread::sleep, time::Duration};
     use tempfile::tempdir;
 
     // Helper function to create a file with known content and timestamp
@@ -254,4 +250,3 @@ mod tests {
         Ok(())
     }
 }
-
