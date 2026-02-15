@@ -1,11 +1,11 @@
 use crate::buckets::upload_file;
-use crate::config::{StorageSettings, load_config};
+use crate::config::load_config;
 use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
 use std::hash::Hasher;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::UNIX_EPOCH;
 use tokio::task::JoinSet;
 use walkdir::WalkDir;
@@ -76,23 +76,32 @@ async fn main() -> Result<()> {
             .context("Cannot construct output path!")?;
         let password = zip_password.clone();
         let storage = config.storage.clone();
-        tasks.spawn_blocking(move || -> anyhow::Result<(PathBuf, StorageSettings)> {
-            compress_sources(dest.as_path(), sources, password).context("Error compressing!")?;
-            Ok((dest, storage))
+
+        tasks.spawn(async move {
+            let dest_clone = dest.clone();
+            let sources_clone = sources.clone();
+            let password_clone = password.clone();
+
+            tokio::task::spawn_blocking(move || {
+                compress_sources(dest_clone.as_path(), sources_clone, password_clone)
+            })
+            .await
+            .context("Panic in compression task")?
+            .context("Error during compression")?;
+
+            upload_file(dest.as_path(), &storage)
+                .await
+                .context("Error uploading file")?;
+
+            Ok::<(), anyhow::Error>(())
         });
     }
+
     while let Some(res) = tasks.join_next().await {
-        let path = res?.context("Error during spawned task execution")?;
-        upload_file(path.0.as_path(), &path.1)
-            .await
-            .context("Error uploading file")?;
+        res.context("Task execution failed")??;
     }
 
-    //let bucket_name = std::env::var("BUCKET_NAME").unwrap();
-
-    //upload_to_bucket(&String::from("d:/projekty.zip"), &bucket_name).await;
-
-    Ok(()) // Indicate successful execution of the main function.
+    Ok(())
 }
 
 #[cfg(test)]
