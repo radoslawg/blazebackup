@@ -7,7 +7,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 #[derive(Debug, serde::Deserialize)]
 pub struct BackupConfig {
     pub backups: Vec<BackupSettings>,
-    storage: StorageSettings,
+    pub storage: StorageSettings,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -17,11 +17,11 @@ pub struct BackupSettings {
     output_filename: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct StorageSettings {
-    bucket: String,
+#[derive(Debug, serde::Deserialize, Clone)]
+pub struct StorageSettings {
+    pub bucket: String,
     #[serde(default)]
-    key_prefix: String,
+    pub key_prefix: String,
 }
 
 impl BackupSettings {

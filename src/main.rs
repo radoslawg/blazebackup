@@ -1,4 +1,5 @@
-use crate::config::load_config;
+use crate::buckets::upload_file;
+use crate::config::{StorageSettings, load_config};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
@@ -74,10 +75,17 @@ async fn main() -> Result<()> {
             .output_filename(&compression_path)
             .context("Cannot construct output path!")?;
         let password = zip_password.clone();
-        tasks.spawn_blocking(move || compress_sources(dest.as_path(), sources, password));
+        let storage = config.storage.clone();
+        tasks.spawn_blocking(move || -> anyhow::Result<(PathBuf, StorageSettings)> {
+            compress_sources(dest.as_path(), sources, password).context("Error compressing!")?;
+            Ok((dest, storage))
+        });
     }
     while let Some(res) = tasks.join_next().await {
-        res??;
+        let path = res?.context("Error during spawned task execution")?;
+        upload_file(path.0.as_path(), &path.1)
+            .await
+            .context("Error uploading file")?;
     }
 
     //let bucket_name = std::env::var("BUCKET_NAME").unwrap();
@@ -90,7 +98,7 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, io::Write, thread::sleep, time::Duration};
+    use std::{fs, io::Write, path::PathBuf, thread::sleep, time::Duration};
     use tempfile::tempdir;
 
     // Helper function to create a file with known content and timestamp
