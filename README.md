@@ -1,5 +1,80 @@
+# BlazeBackup
 
 ![Build Workflow](https://git.grzanka.org/radoslawg/blazebackup/actions/workflows/build.yaml/badge.svg)
+
+BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compatible storage (e.g., Backblaze B2, AWS S3). It compresses specified source directories into 7z archives with AES-256 encryption and uploads them in a parallelized pipeline.
+
+## Features
+
+- **7z Compression**: High-ratio compression using `sevenz-rust2`.
+- **AES-256 Encryption**: Protects your archives with a password.
+- **Parallel Pipeline**: Compresses and uploads multiple backup sets concurrently for maximum efficiency.
+- **S3-Compatible**: Works with any S3-compatible storage provider.
+- **Deterministic Hashing**: Calculates directory hashes to uniquely identify states.
+
+## Configuration
+
+The application looks for a configuration file at `~/.config/blazebackup/config.json`.
+
+### Example `config.json`
+
+```json
+{
+  "backups": [
+    {
+      "name": "work-projects",
+      "sources": ["C:/Users/Name/Documents/Work", "D:/Projects"],
+      "output_filename": "backup_{name}_{timestamp}.7z"
+    }
+  ],
+  "storage": {
+    "bucket": "my-backup-bucket",
+    "key_prefix": "daily"
+  }
+}
+```
+
+- `output_filename` supports placeholders:
+    - `{name}`: The name defined in the backup settings.
+    - `{timestamp}`: Current time in `YYYYMMDD-HHMMSS` format.
+
+## Environment Variables
+
+The following variables should be defined in a `.env` file or your system environment:
+
+- `AWS_ACCESS_KEY_ID`: Your S3 access key.
+- `AWS_SECRET_ACCESS_KEY`: Your S3 secret key.
+- `AWS_REGION`: The region for your bucket.
+- `AWS_ENDPOINT_URL`: The custom endpoint (essential for providers like Backblaze B2).
+- `ZIP_PASSWORD`: Password used for 7z AES encryption.
+- `COMPRESSION_DIR`: Temporary directory used for compression before upload (defaults to `d:/temp`).
+
+## Build and Usage
+
+### Prerequisites
+
+- Rust (Edition 2024)
+
+### Build
+
+```bash
+# Build for release
+cargo build --release
+```
+
+### Run
+
+```bash
+# Run the application
+cargo run
+```
+
+### Test
+
+```bash
+# Run tests
+cargo test
+```
 
 ## Future
 - [ ] Decide upon incremental backups?
