@@ -12,7 +12,7 @@ pub struct BackupConfig {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct BackupSettings {
-    name: String,
+    pub name: String,
     pub sources: Vec<String>,
     output_filename: String,
 }
