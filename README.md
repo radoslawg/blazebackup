@@ -10,11 +10,13 @@ BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compa
 - **AES-256 Encryption**: Protects your archives with a password.
 - **Parallel Pipeline**: Compresses and uploads multiple backup sets concurrently for maximum efficiency.
 - **S3-Compatible**: Works with any S3-compatible storage provider.
+- **Smart Change Detection**: Skips backups if source directory contents haven't changed since the last successful run, saving bandwidth and storage.
 - **Deterministic Hashing**: Calculates directory hashes to uniquely identify states.
 
 ## Configuration
 
 The application looks for a configuration file at `~/.config/blazebackup/config.json`.
+The application maintains state (hashes of previous backups) at `~/.config/blazebackup/state.json`.
 
 ### Example `config.json`
 
@@ -77,4 +79,6 @@ cargo test
 ```
 
 ## Future
-- [ ] Decide upon incremental backups?
+- [x] Implement state tracking to skip unchanged backups.
+- [ ] Implement restore functionality.
+- [ ] Support partial/incremental uploads (only changed files within a directory).
