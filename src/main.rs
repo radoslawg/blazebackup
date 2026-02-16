@@ -1,5 +1,6 @@
 use crate::buckets::upload_file;
 use crate::config::load_config;
+use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
@@ -7,11 +8,13 @@ use simplehash::fnv::Fnv1aHasher64;
 use std::hash::Hasher;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
+use thiserror::Error;
 use tokio::task::JoinSet;
 use walkdir::WalkDir;
 
 mod buckets;
 mod config;
+mod state;
 
 pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
     println!("Compressing: {:?}", destination);
@@ -51,11 +54,42 @@ pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
     Ok(format!("{:x}", hasher.finish_raw()))
 }
 
+#[derive(Debug, Error)]
+pub enum HashingError {
+    #[error("Hash already exists")]
+    HashExists,
+}
+
+fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<(), HashingError> {
+    match state.backups.iter_mut().find(|s| &s.name == backup_name) {
+        Some(s) => {
+            if s.hash == hash {
+                return Err(HashingError::HashExists);
+            } else {
+                s.hash = hash;
+                Ok(())
+            }
+        }
+        None => {
+            state.backups.push(BackupState {
+                name: backup_name.clone(),
+                hash: hash,
+            });
+            Ok(())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
-    let config = load_config().await?;
+    let config = load_config().await.context("Cannot load config")?;
+    let mut state = match load_state().await {
+        Ok(state) => state,
+        Err(_) => State { backups: vec![] },
+    };
+    println!("{:?}", state);
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
@@ -66,11 +100,20 @@ async fn main() -> Result<()> {
     let mut tasks = JoinSet::new();
     for b in config.backups.iter() {
         let sources = b.sources.clone();
-        println!(
-            "source: {:?}, hash: {:?}",
-            sources,
-            calculate_directory_hash(&sources)
-        );
+        let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
+
+        println!("{}, {}", b.name, backup_hash);
+        match update_hash(&mut state, &b.name, backup_hash) {
+            Ok(_) => {}
+            Err(e) => match e {
+                HashingError::HashExists => {
+                    println!("Hash exists!");
+                    continue;
+                }
+            },
+        }
+
+        state.save_state().await.context("Cannot save state.")?;
         let dest = b
             .output_filename(&compression_path)
             .context("Cannot construct output path!")?;
