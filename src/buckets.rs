@@ -16,7 +16,7 @@ pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Re
         configuration.key_prefix,
         String::from(filename.to_str().context("Cannot convert to str")?)
     );
-    println!("Uploading: {}", destination);
+    log::debug!("Uploading: {}", destination);
     upload_to_bucket(&filepath, &configuration.bucket, &destination).await;
     return Ok(());
 }
@@ -42,8 +42,8 @@ async fn upload_to_bucket(filename: &Path, bucket_name: &String, destination: &S
         .send()
         .await
     {
-        Ok(_) => println!("Upload successfull to bucket: {:?}", bucket_name),
-        Err(err) => eprintln!("Error uploading object: {:?}", err),
+        Ok(_) => log::info!("Upload successfull to bucket: {:?}", bucket_name),
+        Err(err) => log::error!("Error uploading object: {:?}", err),
     };
 }
 
@@ -59,7 +59,7 @@ async fn get_bucket(
 
     match bucket {
         Some(b) => {
-            println!("Bucket '{}' exists.", bucket_name);
+            log::debug!("Bucket '{}' exists.", bucket_name);
             return Ok(b.clone());
         }
         None => {
