@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
+use simplelog::TermLogger;
 use std::hash::Hasher;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -17,7 +18,7 @@ mod config;
 mod state;
 
 pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
-    println!("Compressing: {:?}", destination);
+    log::info!("Compressing: {:?}", destination);
     let mut writer = sevenz_rust2::ArchiveWriter::create(destination).expect("create writer ok");
     writer.set_content_methods(vec![
         encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
@@ -82,6 +83,16 @@ fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    TermLogger::init(
+        log::LevelFilter::Debug,
+        simplelog::Config::default(),
+        simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto,
+    )
+    .unwrap();
+
+    log::info!("BackBlaze system starting..");
+
     dotenv().ok();
 
     let config = load_config().await.context("Cannot load config")?;
@@ -89,7 +100,7 @@ async fn main() -> Result<()> {
         Ok(state) => state,
         Err(_) => State { backups: vec![] },
     };
-    println!("{:?}", state);
+    log::debug!("{:?}", state);
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
@@ -102,12 +113,12 @@ async fn main() -> Result<()> {
         let sources = b.sources.clone();
         let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
-        println!("{}, {}", b.name, backup_hash);
+        log::debug!("{}, {}", b.name, backup_hash);
         match update_hash(&mut state, &b.name, backup_hash) {
             Ok(_) => {}
             Err(e) => match e {
                 HashingError::HashExists => {
-                    println!("Hash exists!");
+                    log::debug!("Hash exists!");
                     continue;
                 }
             },
