@@ -34,7 +34,7 @@ impl BackupSettings {
             Local::now().format("%Y%m%d-%H%M%S").to_string().as_str(),
         );
 
-        return Ok(PathBuf::from(&output_dir).join(temp_filename));
+        Ok(PathBuf::from(&output_dir).join(temp_filename))
     }
 }
 
@@ -58,7 +58,7 @@ pub async fn load_config() -> Result<BackupConfig> {
     let home_path = std::env::home_dir().context("Failed to find Home dir")?;
 
     // Construct path to config.json in the same directory
-    let config_path = PathBuf::from(home_path)
+    let config_path = home_path
         .join(".config")
         .join("blazebackup")
         .join("config.json");

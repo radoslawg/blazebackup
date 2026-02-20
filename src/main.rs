@@ -6,6 +6,7 @@ use dotenv::dotenv;
 use sevenz_rust2::encoder_options;
 use simplehash::fnv::Fnv1aHasher64;
 use simplelog::TermLogger;
+use std::collections::HashMap;
 use std::hash::Hasher;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -55,6 +56,106 @@ pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
     Ok(format!("{:x}", hasher.finish_raw()))
 }
 
+pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+
+    let mut sorted_paths = Vec::from(paths);
+    sorted_paths.sort();
+
+    for p in sorted_paths {
+        let walkdir = WalkDir::new(&p);
+        for entry in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
+            let mut hasher = Fnv1aHasher64::new();
+            let uentry =
+                entry.context("Failed to access directory entry during hash calculation")?;
+            if uentry.file_type().is_file() {
+                let metadata = uentry.metadata()?;
+                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
+                let file_size = metadata.len();
+
+                hasher.write(&modified.to_ne_bytes());
+                hasher.write(&file_size.to_ne_bytes());
+                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
+                result.insert(
+                    String::from(
+                        uentry
+                            .path()
+                            .to_str()
+                            .context("Cannot convert path to string")?,
+                    ),
+                    format!("{:x}", hasher.finish_raw()),
+                );
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn convert_hashmap(original_map: &HashMap<String, String>) -> HashMap<String, (String, bool)> {
+    let mut new_map = HashMap::new();
+    for (key, value) in original_map {
+        new_map.insert(key.clone(), (value.clone(), false));
+    }
+    new_map
+}
+
+pub fn get_changed_files(
+    paths: &[String],
+    hashes: &HashMap<String, String>,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut changed = Vec::new();
+    let mut deleted = Vec::new();
+    let mut traced_map = convert_hashmap(hashes);
+
+    for p in paths {
+        for entry in WalkDir::new(p) {
+            let mut hasher = Fnv1aHasher64::new();
+            let uentry =
+                entry.context("Failed to access directory entry during hash calculation")?;
+            if uentry.file_type().is_file() {
+                let metadata = uentry.metadata()?;
+                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
+                let file_size = metadata.len();
+
+                hasher.write(&modified.to_ne_bytes());
+                hasher.write(&file_size.to_ne_bytes());
+                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
+                let filename = String::from(
+                    uentry
+                        .path()
+                        .to_str()
+                        .context("Cannot convert path to String")?,
+                );
+                match traced_map.get_mut(&filename) {
+                    Some(h) => {
+                        if h.0 != format!("{:x}", hasher.finish_raw()) {
+                            changed.push(String::from(
+                                uentry
+                                    .path()
+                                    .to_str()
+                                    .context("Cannot convert path to String")?,
+                            ));
+                        }
+                        h.1 = true;
+                    }
+                    None => changed.push(String::from(
+                        uentry
+                            .path()
+                            .to_str()
+                            .context("Cannot convert path to String")?,
+                    )),
+                }
+            }
+        }
+    }
+    for (filename, (_, was_found)) in traced_map {
+        if !was_found {
+            deleted.push(filename);
+        }
+    }
+    Ok((changed, deleted))
+}
+
 #[derive(Debug, Error)]
 pub enum HashingError {
     #[error("Hash already exists")]
@@ -65,7 +166,7 @@ fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<
     match state.backups.iter_mut().find(|s| &s.name == backup_name) {
         Some(s) => {
             if s.hash == hash {
-                return Err(HashingError::HashExists);
+                Err(HashingError::HashExists)
             } else {
                 s.hash = hash;
                 Ok(())
@@ -74,7 +175,8 @@ fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<
         None => {
             state.backups.push(BackupState {
                 name: backup_name.clone(),
-                hash: hash,
+                hash,
+                file_hashes: HashMap::new(),
             });
             Ok(())
         }
@@ -114,6 +216,21 @@ async fn main() -> Result<()> {
         let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
         log::debug!("{}, {}", b.name, backup_hash);
+        let files_hash = calculate_files_hash(&sources).context("Cannot compute files hashes")?;
+        let (changed_files, deleted_files) = get_changed_files(&sources, &files_hash)?;
+        match state.backups.iter_mut().find(|s| s.name == b.name) {
+            Some(s) => s.file_hashes = files_hash,
+            None => state.backups.push(BackupState {
+                name: b.name.clone(),
+                hash: String::from(""),
+                file_hashes: files_hash,
+            }),
+        }
+        state.save_state().await.context("Cannot save state.")?;
+        if changed_files.is_empty() && deleted_files.is_empty() {
+            println!("{} - No change detected!", b.name);
+            continue;
+        }
         match update_hash(&mut state, &b.name, backup_hash) {
             Ok(_) => {}
             Err(e) => match e {
