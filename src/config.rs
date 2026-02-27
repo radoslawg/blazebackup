@@ -25,8 +25,8 @@ pub struct StorageSettings {
 }
 
 impl BackupSettings {
-    pub fn output_filename(&self, output_dir: &String) -> Result<PathBuf> {
-        if output_dir.is_empty() || self.output_filename.is_empty() {
+    pub fn output_filename(&self, output_dir: &Path) -> Result<PathBuf> {
+        if !output_dir.exists() || self.output_filename.is_empty() {
             bail!("Cannot create Path! output or output_filename is empty!");
         }
         let temp_filename = self.output_filename.replace("{name}", &self.name).replace(
@@ -34,7 +34,7 @@ impl BackupSettings {
             Local::now().format("%Y%m%d-%H%M%S").to_string().as_str(),
         );
 
-        Ok(PathBuf::from(&output_dir).join(temp_filename))
+        Ok(output_dir.to_path_buf().join(temp_filename))
     }
 }
 
@@ -82,7 +82,7 @@ mod tests {
         };
         assert_eq!(
             settings
-                .output_filename(&"/tmp".to_string())
+                .output_filename(PathBuf::from("/tmp").as_path())
                 .unwrap()
                 .parent()
                 .unwrap(),
@@ -90,7 +90,7 @@ mod tests {
         );
         assert_eq!(
             settings
-                .output_filename(&"/tmp".to_string())
+                .output_filename(PathBuf::from("/tmp").as_path())
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -106,7 +106,11 @@ mod tests {
 
             output_filename: "".to_string(),
         };
-        assert!(settings.output_filename(&"/tmp".to_string()).is_err());
+        assert!(
+            settings
+                .output_filename(PathBuf::from("/tmp").as_path())
+                .is_err()
+        );
     }
 
     #[test]
@@ -119,7 +123,7 @@ mod tests {
         };
         assert_eq!(
             settings
-                .output_filename(&"/tmp".to_string())
+                .output_filename(PathBuf::from("/tmp").as_path())
                 .unwrap()
                 .parent()
                 .unwrap(),
@@ -127,7 +131,7 @@ mod tests {
         );
         assert_eq!(
             settings
-                .output_filename(&"/tmp".to_string())
+                .output_filename(PathBuf::from("/tmp").as_path())
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -143,7 +147,9 @@ mod tests {
 
             output_filename: "backup_{name}_{timestamp}.7z".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from("/tmp").as_path())
+            .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         // Verify pattern: backup_testname_YYYYMMDD-HHMMSS.7z
         assert!(filename.starts_with("backup_testname_"));
@@ -168,7 +174,9 @@ mod tests {
 
             output_filename: "{name}.zip".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from("/tmp").as_path())
+            .unwrap();
         assert_eq!(result.file_name().unwrap(), "mybackup.zip");
     }
 
@@ -180,7 +188,9 @@ mod tests {
 
             output_filename: "backup_{timestamp}.zip".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from("/tmp").as_path())
+            .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("backup_"));
         assert!(filename.ends_with(".zip"));
@@ -200,7 +210,9 @@ mod tests {
 
             output_filename: "{name}_{name}_{timestamp}_{name}.zip".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from(&"/tmp").as_path())
+            .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("prod_prod_"));
         assert!(filename.ends_with("_prod.zip"));
@@ -214,7 +226,9 @@ mod tests {
 
             output_filename: "{name}_{timestamp}.zip".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from("/tmp").as_path())
+            .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with('_')); // Empty name results in leading underscore
     }
@@ -227,7 +241,9 @@ mod tests {
 
             output_filename: "{name}.zip".to_string(),
         };
-        let result = settings.output_filename(&"/tmp".to_string()).unwrap();
+        let result = settings
+            .output_filename(PathBuf::from(&"/tmp").as_path())
+            .unwrap();
         assert_eq!(result.file_name().unwrap(), "my-backup_v1.2.zip");
     }
 
@@ -257,7 +273,7 @@ mod tests {
         assert_eq!(config.backups[0].name, "test_backup");
         assert_eq!(
             config.backups[0]
-                .output_filename(&"/tmp".to_string())
+                .output_filename(PathBuf::from("/tmp").as_path())
                 .unwrap()
                 .file_name()
                 .unwrap(),

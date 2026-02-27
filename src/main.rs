@@ -1,160 +1,20 @@
 use crate::buckets::upload_file;
 use crate::config::load_config;
+use crate::fileutil::*;
 use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
-use sevenz_rust2::encoder_options;
-use simplehash::fnv::Fnv1aHasher64;
 use simplelog::TermLogger;
 use std::collections::HashMap;
-use std::hash::Hasher;
-use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::path::PathBuf;
+use tempfile::tempdir;
 use thiserror::Error;
 use tokio::task::JoinSet;
-use walkdir::WalkDir;
 
 mod buckets;
 mod config;
+mod fileutil;
 mod state;
-
-pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
-    log::info!("Compressing: {:?}", destination);
-    let mut writer = sevenz_rust2::ArchiveWriter::create(destination).expect("create writer ok");
-    writer.set_content_methods(vec![
-        encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
-        encoder_options::Lzma2Options::from_level_mt(9, 32, 16 * 1024 * 1024).into(),
-    ]);
-    for source in sources {
-        writer.push_source_path(source, |_| true).expect("pack ok");
-    }
-    writer.finish()?;
-    Ok(())
-}
-
-pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
-    let mut hasher = Fnv1aHasher64::new();
-
-    let mut sorted_paths = Vec::from(paths);
-    sorted_paths.sort();
-
-    for p in sorted_paths {
-        let walkdir = WalkDir::new(&p);
-        for dir in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
-            let udir = dir.context("Failed to access directory entry during hash calculation")?;
-            if udir.file_type().is_file() {
-                let metadata = udir.metadata()?;
-                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
-                let file_size = metadata.len();
-
-                hasher.write(&modified.to_ne_bytes());
-                hasher.write(&file_size.to_ne_bytes());
-                hasher.write(udir.path().as_os_str().as_encoded_bytes());
-            }
-        }
-    }
-    Ok(format!("{:x}", hasher.finish_raw()))
-}
-
-pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>> {
-    let mut result = HashMap::new();
-
-    let mut sorted_paths = Vec::from(paths);
-    sorted_paths.sort();
-
-    for p in sorted_paths {
-        let walkdir = WalkDir::new(&p);
-        for entry in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
-            let mut hasher = Fnv1aHasher64::new();
-            let uentry =
-                entry.context("Failed to access directory entry during hash calculation")?;
-            if uentry.file_type().is_file() {
-                let metadata = uentry.metadata()?;
-                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
-                let file_size = metadata.len();
-
-                hasher.write(&modified.to_ne_bytes());
-                hasher.write(&file_size.to_ne_bytes());
-                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
-                result.insert(
-                    String::from(
-                        uentry
-                            .path()
-                            .to_str()
-                            .context("Cannot convert path to string")?,
-                    ),
-                    format!("{:x}", hasher.finish_raw()),
-                );
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn convert_hashmap(original_map: &HashMap<String, String>) -> HashMap<String, (String, bool)> {
-    let mut new_map = HashMap::new();
-    for (key, value) in original_map {
-        new_map.insert(key.clone(), (value.clone(), false));
-    }
-    new_map
-}
-
-pub fn get_changed_files(
-    paths: &[String],
-    hashes: &HashMap<String, String>,
-) -> Result<(Vec<String>, Vec<String>)> {
-    let mut changed = Vec::new();
-    let mut deleted = Vec::new();
-    let mut traced_map = convert_hashmap(hashes);
-
-    for p in paths {
-        for entry in WalkDir::new(p) {
-            let mut hasher = Fnv1aHasher64::new();
-            let uentry =
-                entry.context("Failed to access directory entry during hash calculation")?;
-            if uentry.file_type().is_file() {
-                let metadata = uentry.metadata()?;
-                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
-                let file_size = metadata.len();
-
-                hasher.write(&modified.to_ne_bytes());
-                hasher.write(&file_size.to_ne_bytes());
-                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
-                let filename = String::from(
-                    uentry
-                        .path()
-                        .to_str()
-                        .context("Cannot convert path to String")?,
-                );
-                match traced_map.get_mut(&filename) {
-                    Some(h) => {
-                        if h.0 != format!("{:x}", hasher.finish_raw()) {
-                            changed.push(String::from(
-                                uentry
-                                    .path()
-                                    .to_str()
-                                    .context("Cannot convert path to String")?,
-                            ));
-                        }
-                        h.1 = true;
-                    }
-                    None => changed.push(String::from(
-                        uentry
-                            .path()
-                            .to_str()
-                            .context("Cannot convert path to String")?,
-                    )),
-                }
-            }
-        }
-    }
-    for (filename, (_, was_found)) in traced_map {
-        if !was_found {
-            deleted.push(filename);
-        }
-    }
-    Ok((changed, deleted))
-}
 
 #[derive(Debug, Error)]
 pub enum HashingError {
@@ -177,6 +37,7 @@ fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<
                 name: backup_name.clone(),
                 hash,
                 file_hashes: HashMap::new(),
+                deleted_files: Vec::new(),
             });
             Ok(())
         }
@@ -185,30 +46,45 @@ fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize Logger
     TermLogger::init(
         log::LevelFilter::Debug,
         simplelog::Config::default(),
         simplelog::TerminalMode::Mixed,
         simplelog::ColorChoice::Auto,
     )
-    .unwrap();
-
-    log::info!("BackBlaze system starting..");
+    .context("Cannot initilize Logger")?;
 
     dotenv().ok();
+    log::info!("BackBlaze system starting..");
 
     let config = load_config().await.context("Cannot load config")?;
     let mut state = match load_state().await {
         Ok(state) => state,
         Err(_) => State { backups: vec![] },
     };
+
     log::debug!("{:?}", state);
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
         Err(_) => String::from(""),
     };
-    let compression_path = std::env::var("COMPRESSION_DIR").unwrap_or(String::from("d:/temp"));
+
+    let _tempdir_guard: Option<tempfile::TempDir>;
+    // TODO: Change here to use tempdir
+    let compression_path = match std::env::var("COMPRESSION_DIR") {
+        Ok(p) => {
+            _tempdir_guard = None;
+            PathBuf::from(p)
+        }
+        Err(_) => {
+            let tmp = tempdir().context("Cannot create temporary directory")?;
+            let path = tmp.path().to_path_buf();
+            _tempdir_guard = Some(tmp);
+            path
+        }
+    };
 
     let mut tasks = JoinSet::new();
     for b in config.backups.iter() {
@@ -218,19 +94,30 @@ async fn main() -> Result<()> {
         log::debug!("{}, {}", b.name, backup_hash);
         let files_hash = calculate_files_hash(&sources).context("Cannot compute files hashes")?;
         let (changed_files, deleted_files) = get_changed_files(&sources, &files_hash)?;
+        // TODO: We need to add deleted_files to state file for later incremental backup.
         match state.backups.iter_mut().find(|s| s.name == b.name) {
-            Some(s) => s.file_hashes = files_hash,
+            Some(s) => {
+                s.file_hashes = files_hash;
+                s.deleted_files = deleted_files.clone()
+            }
             None => state.backups.push(BackupState {
                 name: b.name.clone(),
                 hash: String::from(""),
                 file_hashes: files_hash,
+                deleted_files: deleted_files.clone(),
             }),
         }
+
+        // TODO: Somehow this needs to be more robust and saved only after succesful processing.
+        // also, later we enter asynchronous computation so it needs to be even more robust.
+        // Maybe store separate state file for each config.backups entry?
         state.save_state().await.context("Cannot save state.")?;
+
         if changed_files.is_empty() && deleted_files.is_empty() {
-            println!("{} - No change detected!", b.name);
+            log::info!("{} - No change detected! No processing", b.name);
             continue;
         }
+
         match update_hash(&mut state, &b.name, backup_hash) {
             Ok(_) => {}
             Err(e) => match e {
@@ -241,13 +128,16 @@ async fn main() -> Result<()> {
             },
         }
 
+        //TODO: Why this is saved two times? Because of continues; above?
         state.save_state().await.context("Cannot save state.")?;
+
         let dest = b
-            .output_filename(&compression_path)
+            .output_filename(compression_path.as_path())
             .context("Cannot construct output path!")?;
         let password = zip_password.clone();
         let storage = config.storage.clone();
 
+        // Tokio magic
         tasks.spawn(async move {
             let dest_clone = dest.clone();
             let sources_clone = sources.clone();
