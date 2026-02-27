@@ -14,6 +14,7 @@ pub struct BackupState {
     pub name: String,
     pub hash: String,
     pub file_hashes: HashMap<String, String>,
+    pub deleted_files: Vec<String>,
 }
 
 pub async fn load_state() -> Result<State> {
