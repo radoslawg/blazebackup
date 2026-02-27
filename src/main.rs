@@ -92,7 +92,6 @@ async fn main() -> Result<()> {
 
         let changed_files: Option<Vec<String>>;
         let deleted_files: Option<Vec<String>>;
-        // TODO: We need to add deleted_files to state file for later incremental backup.
         match state.backups.iter_mut().find(|s| s.name == b.name) {
             Some(s) => {
                 (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
