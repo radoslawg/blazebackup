@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         Err(_) => State { backups: vec![] },
     };
 
-    log::debug!("{:?}", state);
+    //log::debug!("{:?}", state);
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
@@ -90,29 +90,38 @@ async fn main() -> Result<()> {
         let sources = b.sources.clone();
         let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
-        log::debug!("{}, {}", b.name, backup_hash);
-        let files_hash = calculate_files_hash(&sources).context("Cannot compute files hashes")?;
-        let (changed_files, deleted_files) = get_changed_files(&sources, &files_hash)?;
+        let changed_files: Option<Vec<String>>;
+        let deleted_files: Option<Vec<String>>;
         // TODO: We need to add deleted_files to state file for later incremental backup.
         match state.backups.iter_mut().find(|s| s.name == b.name) {
             Some(s) => {
-                s.file_hashes = files_hash;
-                s.deleted_files = deleted_files.clone()
+                (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
+                s.deleted_files = deleted_files.clone().unwrap_or_default();
             }
-            None => state.backups.push(BackupState {
-                name: b.name.clone(),
-                hash: String::from(""),
-                file_hashes: files_hash,
-                deleted_files: deleted_files.clone(),
-            }),
+            None => {
+                let files_hash =
+                    calculate_files_hash(&sources).context("Cannot compute files hashes")?;
+                changed_files = None; // TODO: Figure this out.
+                deleted_files = None;
+                state.backups.push(BackupState {
+                    name: b.name.clone(),
+                    hash: String::from(""),
+                    file_hashes: files_hash,
+                    deleted_files: vec![],
+                })
+            }
         }
+
+        log::debug!("Changed files: {:?}", changed_files);
+        log::debug!("Deleted files: {:?}", deleted_files);
 
         // TODO: Somehow this needs to be more robust and saved only after succesful processing.
         // also, later we enter asynchronous computation so it needs to be even more robust.
         // Maybe store separate state file for each config.backups entry?
         state.save_state().await.context("Cannot save state.")?;
+        //panic!("Temporary bailout");
 
-        if changed_files.is_empty() && deleted_files.is_empty() {
+        if changed_files.is_none() && deleted_files.is_none() {
             log::info!("{} - No change detected! No processing", b.name);
             continue;
         }

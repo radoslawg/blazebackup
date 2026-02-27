@@ -84,9 +84,9 @@ pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>>
 pub fn get_changed_files(
     paths: &[String],
     hashes: &HashMap<String, String>,
-) -> Result<(Vec<String>, Vec<String>)> {
-    let mut changed = Vec::new();
-    let mut deleted = Vec::new();
+) -> Result<(Option<Vec<String>>, Option<Vec<String>>)> {
+    let mut _changed = Vec::new();
+    let mut _deleted = Vec::new();
     let mut traced_map = convert_hashmap(hashes);
 
     for p in paths {
@@ -111,7 +111,7 @@ pub fn get_changed_files(
                 match traced_map.get_mut(&filename) {
                     Some(h) => {
                         if h.0 != format!("{:x}", hasher.finish_raw()) {
-                            changed.push(String::from(
+                            _changed.push(String::from(
                                 uentry
                                     .path()
                                     .to_str()
@@ -120,7 +120,7 @@ pub fn get_changed_files(
                         }
                         h.1 = true;
                     }
-                    None => changed.push(String::from(
+                    None => _changed.push(String::from(
                         uentry
                             .path()
                             .to_str()
@@ -132,8 +132,20 @@ pub fn get_changed_files(
     }
     for (filename, (_, was_found)) in traced_map {
         if !was_found {
-            deleted.push(filename);
+            _deleted.push(filename);
         }
+    }
+    let changed: Option<Vec<String>>;
+    if _changed.is_empty() {
+        changed = None;
+    } else {
+        changed = Some(_changed);
+    }
+    let deleted: Option<Vec<String>>;
+    if _deleted.is_empty() {
+        deleted = None;
+    } else {
+        deleted = Some(_deleted);
     }
     Ok((changed, deleted))
 }
