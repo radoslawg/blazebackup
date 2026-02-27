@@ -100,6 +100,10 @@ async fn main() -> Result<()> {
                 log::info!("Incremental Mode for {}", b.name);
                 log::debug!("Changed files: {:?}", changed_files);
                 log::debug!("Deleted files: {:?}", deleted_files);
+                if changed_files.is_none() {
+                    log::info!("{} - No change detected! No processing", b.name);
+                    continue;
+                }
             }
             BackupMode::Full => {
                 log::info!("Full mode for {}", b.name);
@@ -111,14 +115,6 @@ async fn main() -> Result<()> {
         // Maybe store separate state file for each config.backups entry?
         state.save_state().await.context("Cannot save state.")?;
         panic!("Temporary bailout");
-
-        if changed_files.is_none() && deleted_files.is_none() {
-            log::info!("{} - No change detected! No processing", b.name);
-            continue;
-        }
-
-        //TODO: Why this is saved two times? Because of continues; above?
-        state.save_state().await.context("Cannot save state.")?;
 
         let dest = b
             .output_filename(compression_path.as_path())
