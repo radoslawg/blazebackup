@@ -72,7 +72,6 @@ async fn main() -> Result<()> {
     };
 
     let _tempdir_guard: Option<tempfile::TempDir>;
-    // TODO: Change here to use tempdir
     let compression_path = match std::env::var("COMPRESSION_DIR") {
         Ok(p) => {
             _tempdir_guard = None;
