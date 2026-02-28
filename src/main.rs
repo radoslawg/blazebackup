@@ -4,6 +4,7 @@ use crate::fileutil::*;
 use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
+use log::debug;
 use simplelog::TermLogger;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -78,13 +79,20 @@ async fn main() -> Result<()> {
             Some(s) => {
                 (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
                 s.deleted_files = deleted_files.clone().unwrap_or_default();
+                log::info!("Incremental Mode for {}", b.name);
+                log::debug!("Changed files: {:?}", changed_files);
+                log::debug!("Deleted files: {:?}", deleted_files);
+                if changed_files.is_none() {
+                    log::info!("{} - No change detected! No processing", b.name);
+                    continue;
+                }
                 BackupMode::Incremental
             }
             None => {
+                log::info!("Full mode for {}", b.name);
                 let files_hash =
                     calculate_files_hash(&sources).context("Cannot compute files hashes")?;
-                changed_files = None; // TODO: Figure this out.
-                deleted_files = None;
+                changed_files = Some(files_hash.keys().cloned().collect());
                 state.backups.push(BackupState {
                     name: b.name.clone(),
                     hash: String::from(""),
@@ -95,37 +103,32 @@ async fn main() -> Result<()> {
             }
         };
 
-        match mode {
-            BackupMode::Incremental => {
-                log::info!("Incremental Mode for {}", b.name);
-                log::debug!("Changed files: {:?}", changed_files);
-                log::debug!("Deleted files: {:?}", deleted_files);
-                if changed_files.is_none() {
-                    log::info!("{} - No change detected! No processing", b.name);
-                    continue;
-                }
-            }
-            BackupMode::Full => {
-                log::info!("Full mode for {}", b.name);
-            }
-        }
+        let dest = match mode {
+            BackupMode::Incremental => b
+                .output_filename(
+                    compression_path.as_path(),
+                    Some(String::from("Incremental")),
+                )
+                .context("Cannot construct output path!")?,
+            BackupMode::Full => b
+                .output_filename(compression_path.as_path(), None)
+                .context("Cannot construct output path!")?,
+        };
+
+        log::debug!("Destination filename {}", dest.to_str().unwrap_or_default());
 
         // TODO: Somehow this needs to be more robust and saved only after succesful processing.
         // also, later we enter asynchronous computation so it needs to be even more robust.
         // Maybe store separate state file for each config.backups entry?
         state.save_state().await.context("Cannot save state.")?;
-        panic!("Temporary bailout");
 
-        let dest = b
-            .output_filename(compression_path.as_path())
-            .context("Cannot construct output path!")?;
         let password = zip_password.clone();
         let storage = config.storage.clone();
 
         // Tokio magic
         tasks.spawn(async move {
             let dest_clone = dest.clone();
-            let sources_clone = sources.clone();
+            let sources_clone = changed_files.unwrap().clone();
             let password_clone = password.clone();
 
             tokio::task::spawn_blocking(move || {
