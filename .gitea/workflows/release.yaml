@@ -1,0 +1,26 @@
+name: Release Build
+
+on: [push]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload Linux binary artifact
+        uses: https://github.com/christopherHX/gitea-upload-artifact@v4
+        with:
+          name: blazebackup-linux-x86_64
+          path: target/release/blazebackup
