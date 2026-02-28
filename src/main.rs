@@ -1,59 +1,20 @@
 use crate::buckets::upload_file;
 use crate::config::load_config;
+use crate::fileutil::*;
 use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
-use sevenz_rust2::encoder_options;
-use simplehash::fnv::Fnv1aHasher64;
+use log::debug;
 use simplelog::TermLogger;
-use std::hash::Hasher;
-use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::path::PathBuf;
+use tempfile::tempdir;
 use thiserror::Error;
 use tokio::task::JoinSet;
-use walkdir::WalkDir;
 
 mod buckets;
 mod config;
+mod fileutil;
 mod state;
-
-pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
-    log::info!("Compressing: {:?}", destination);
-    let mut writer = sevenz_rust2::ArchiveWriter::create(destination).expect("create writer ok");
-    writer.set_content_methods(vec![
-        encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
-        encoder_options::Lzma2Options::from_level_mt(9, 32, 16 * 1024 * 1024).into(),
-    ]);
-    for source in sources {
-        writer.push_source_path(source, |_| true).expect("pack ok");
-    }
-    writer.finish()?;
-    Ok(())
-}
-
-pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
-    let mut hasher = Fnv1aHasher64::new();
-
-    let mut sorted_paths = Vec::from(paths);
-    sorted_paths.sort();
-
-    for p in sorted_paths {
-        let walkdir = WalkDir::new(&p);
-        for dir in walkdir.sort_by(|a, b| a.path().cmp(b.path())) {
-            let udir = dir.context("Failed to access directory entry during hash calculation")?;
-            if udir.file_type().is_file() {
-                let metadata = udir.metadata()?;
-                let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
-                let file_size = metadata.len();
-
-                hasher.write(&modified.to_ne_bytes());
-                hasher.write(&file_size.to_ne_bytes());
-                hasher.write(udir.path().as_os_str().as_encoded_bytes());
-            }
-        }
-    }
-    Ok(format!("{:x}", hasher.finish_raw()))
-}
 
 #[derive(Debug, Error)]
 pub enum HashingError {
@@ -61,79 +22,113 @@ pub enum HashingError {
     HashExists,
 }
 
-fn update_hash(state: &mut State, backup_name: &String, hash: String) -> Result<(), HashingError> {
-    match state.backups.iter_mut().find(|s| &s.name == backup_name) {
-        Some(s) => {
-            if s.hash == hash {
-                return Err(HashingError::HashExists);
-            } else {
-                s.hash = hash;
-                Ok(())
-            }
-        }
-        None => {
-            state.backups.push(BackupState {
-                name: backup_name.clone(),
-                hash: hash,
-            });
-            Ok(())
-        }
-    }
+enum BackupMode {
+    Full,
+    Incremental,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize Logger
     TermLogger::init(
         log::LevelFilter::Debug,
         simplelog::Config::default(),
         simplelog::TerminalMode::Mixed,
         simplelog::ColorChoice::Auto,
     )
-    .unwrap();
-
-    log::info!("BackBlaze system starting..");
+    .context("Cannot initilize Logger")?;
 
     dotenv().ok();
+    log::info!("BackBlaze system starting..");
 
     let config = load_config().await.context("Cannot load config")?;
     let mut state = match load_state().await {
         Ok(state) => state,
         Err(_) => State { backups: vec![] },
     };
-    log::debug!("{:?}", state);
+
+    //log::debug!("{:?}", state);
 
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
         Err(_) => String::from(""),
     };
-    let compression_path = std::env::var("COMPRESSION_DIR").unwrap_or(String::from("d:/temp"));
+
+    let _tempdir_guard: Option<tempfile::TempDir>;
+    let compression_path = match std::env::var("COMPRESSION_DIR") {
+        Ok(p) => {
+            _tempdir_guard = None;
+            PathBuf::from(p)
+        }
+        Err(_) => {
+            let tmp = tempdir().context("Cannot create temporary directory")?;
+            let path = tmp.path().to_path_buf();
+            _tempdir_guard = Some(tmp);
+            path
+        }
+    };
 
     let mut tasks = JoinSet::new();
     for b in config.backups.iter() {
         let sources = b.sources.clone();
-        let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
+        //let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
-        log::debug!("{}, {}", b.name, backup_hash);
-        match update_hash(&mut state, &b.name, backup_hash) {
-            Ok(_) => {}
-            Err(e) => match e {
-                HashingError::HashExists => {
-                    log::debug!("Hash exists!");
+        let changed_files: Option<Vec<String>>;
+        let deleted_files: Option<Vec<String>>;
+        let mode = match state.backups.iter_mut().find(|s| s.name == b.name) {
+            Some(s) => {
+                (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
+                s.deleted_files = deleted_files.clone().unwrap_or_default();
+                log::info!("Incremental Mode for {}", b.name);
+                log::debug!("Changed files: {:?}", changed_files);
+                log::debug!("Deleted files: {:?}", deleted_files);
+                if changed_files.is_none() {
+                    log::info!("{} - No change detected! No processing", b.name);
                     continue;
                 }
-            },
-        }
+                BackupMode::Incremental
+            }
+            None => {
+                log::info!("Full mode for {}", b.name);
+                let files_hash =
+                    calculate_files_hash(&sources).context("Cannot compute files hashes")?;
+                changed_files = Some(files_hash.keys().cloned().collect());
+                state.backups.push(BackupState {
+                    name: b.name.clone(),
+                    hash: String::from(""),
+                    file_hashes: files_hash,
+                    deleted_files: vec![],
+                });
+                BackupMode::Full
+            }
+        };
 
+        let dest = match mode {
+            BackupMode::Incremental => b
+                .output_filename(
+                    compression_path.as_path(),
+                    Some(String::from("Incremental")),
+                )
+                .context("Cannot construct output path!")?,
+            BackupMode::Full => b
+                .output_filename(compression_path.as_path(), None)
+                .context("Cannot construct output path!")?,
+        };
+
+        log::debug!("Destination filename {}", dest.to_str().unwrap_or_default());
+
+        // TODO: Somehow this needs to be more robust and saved only after succesful processing.
+        // also, later we enter asynchronous computation so it needs to be even more robust.
+        // Maybe store separate state file for each config.backups entry?
         state.save_state().await.context("Cannot save state.")?;
-        let dest = b
-            .output_filename(&compression_path)
-            .context("Cannot construct output path!")?;
+
         let password = zip_password.clone();
         let storage = config.storage.clone();
 
+        // Tokio magic
         tasks.spawn(async move {
             let dest_clone = dest.clone();
-            let sources_clone = sources.clone();
+            let sources_clone = changed_files.unwrap().clone();
             let password_clone = password.clone();
 
             tokio::task::spawn_blocking(move || {

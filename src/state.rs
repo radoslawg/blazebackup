@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::path::Path;
-use std::path::PathBuf;
 use tokio::{fs::File, io::AsyncReadExt, io::AsyncWriteExt};
 
 use anyhow::{Context, Result, bail};
@@ -13,12 +13,14 @@ pub struct State {
 pub struct BackupState {
     pub name: String,
     pub hash: String,
+    pub file_hashes: HashMap<String, String>,
+    pub deleted_files: Vec<String>,
 }
 
 pub async fn load_state() -> Result<State> {
     let home_path = std::env::home_dir().context("Failed to find Home dir")?;
 
-    let state_path = PathBuf::from(home_path)
+    let state_path = home_path
         .join(".config")
         .join("blazebackup")
         .join("state.json");
@@ -46,7 +48,7 @@ impl State {
     pub async fn save_state(&self) -> Result<()> {
         let home_path = std::env::home_dir().context("Failed to find Home dir")?;
 
-        let state_path = PathBuf::from(home_path)
+        let state_path = home_path
             .join(".config")
             .join("blazebackup")
             .join("state.json");
