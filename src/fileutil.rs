@@ -1,7 +1,12 @@
 use anyhow::Context;
 use anyhow::Result;
+use sevenz_rust2::ArchiveEntry;
+use sevenz_rust2::SourceReader;
 use simplehash::Fnv1aHasher64;
+use std::fs::File;
 use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::UNIX_EPOCH;
 use std::{collections::HashMap, hash::Hasher};
 use walkdir::WalkDir;
@@ -15,9 +20,24 @@ pub fn compress_sources(destination: &Path, sources: Vec<String>, password: Stri
         encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
         encoder_options::Lzma2Options::from_level_mt(9, 32, 16 * 1024 * 1024).into(),
     ]);
-    for source in sources {
-        writer.push_source_path(source, |_| true).expect("pack ok");
-    }
+    let s = sources
+        .iter()
+        .map(|e| {
+            let path = PathBuf::from_str(e).unwrap();
+            let filename = path.to_string_lossy();
+            ArchiveEntry::from_path(&path, filename.to_string())
+        })
+        .collect();
+    let r = sources
+        .iter()
+        .map(|e| {
+            let path = PathBuf::from_str(e).unwrap();
+            SourceReader::new(File::open(path).unwrap())
+        })
+        .collect();
+    writer
+        .push_archive_entries(s, r)
+        .context("Cannot compress files")?;
     writer.finish()?;
     Ok(())
 }
