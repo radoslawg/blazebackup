@@ -5,40 +5,39 @@ use sevenz_rust2::SourceReader;
 use simplehash::Fnv1aHasher64;
 use std::fs::File;
 use std::path::Path;
-use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::UNIX_EPOCH;
 use std::{collections::HashMap, hash::Hasher};
 use walkdir::WalkDir;
 
 use sevenz_rust2::{ArchiveWriter, encoder_options};
 
-pub fn compress_sources(destination: &Path, sources: Vec<String>, password: String) -> Result<()> {
+pub fn compress_sources(destination: &Path, sources: &[String], password: &str) -> Result<()> {
     log::info!("Compressing: {:?}", destination);
-    let mut writer = ArchiveWriter::create(destination).expect("create writer ok");
+
+    let mut writer = ArchiveWriter::create(destination)
+        .with_context(|| format!("Failed to create archive at {:?}", destination))?;
     writer.set_content_methods(vec![
-        encoder_options::AesEncoderOptions::new(password.as_str().into()).into(),
-        encoder_options::Lzma2Options::from_level_mt(9, 32, 16 * 1024 * 1024).into(),
+        encoder_options::AesEncoderOptions::new(password.into()).into(),
+        encoder_options::Lzma2Options::from_level_mt(9, 16, 128 * 1024 * 1024).into(),
     ]);
-    let s = sources
-        .iter()
-        .map(|e| {
-            let path = PathBuf::from_str(e).unwrap();
-            let filename = path.to_string_lossy();
-            ArchiveEntry::from_path(&path, filename.to_string())
-        })
-        .collect();
-    let r = sources
-        .iter()
-        .map(|e| {
-            let path = PathBuf::from_str(e).unwrap();
-            SourceReader::new(File::open(path).unwrap())
-        })
-        .collect();
+
+    let mut s = Vec::with_capacity(sources.len());
+    let mut r = Vec::with_capacity(sources.len());
+
+    for source in sources {
+        let path = Path::new(source);
+        let reader = File::open(path).with_context(|| format!("Failed to open file {:?}", path))?;
+        let filename = path.to_string_lossy().into_owned();
+
+        s.push(ArchiveEntry::from_path(path, filename));
+        r.push(SourceReader::new(reader));
+    }
+
     writer
         .push_archive_entries(s, r)
-        .context("Cannot compress files")?;
-    writer.finish()?;
+        .context("Failed to push files to archive")?;
+    writer.finish().context("Failed to Finish archive")?;
+
     Ok(())
 }
 

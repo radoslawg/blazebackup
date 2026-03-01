@@ -4,7 +4,6 @@ use crate::fileutil::*;
 use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
 use dotenv::dotenv;
-use log::debug;
 use simplelog::TermLogger;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -128,11 +127,11 @@ async fn main() -> Result<()> {
         // Tokio magic
         tasks.spawn(async move {
             let dest_clone = dest.clone();
-            let sources_clone = changed_files.unwrap().clone();
+            let sources = changed_files.context("Changed files shoule not be None here")?;
             let password_clone = password.clone();
 
             tokio::task::spawn_blocking(move || {
-                compress_sources(dest_clone.as_path(), sources_clone, password_clone)
+                compress_sources(dest_clone.as_path(), &sources, &password_clone)
             })
             .await
             .context("Panic in compression task")?
