@@ -1,5 +1,5 @@
 use crate::buckets::upload_file;
-use crate::config::{load_config, save_as_yaml};
+use crate::config::load_config;
 use crate::fileutil::*;
 use crate::state::{BackupState, State, load_state};
 use anyhow::{Context, Result};
