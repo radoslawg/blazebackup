@@ -4,20 +4,20 @@ use std::path::{Path, PathBuf};
 
 use tokio::{fs::File, io::AsyncReadExt};
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BackupConfig {
     pub backups: Vec<BackupSettings>,
     pub storage: StorageSettings,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BackupSettings {
     pub name: String,
     pub sources: Vec<String>,
     output_filename: String,
 }
 
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
 pub struct StorageSettings {
     pub bucket: String,
     #[serde(default)]
@@ -62,7 +62,8 @@ async fn load_config_from_file(path: &Path) -> Result<BackupConfig> {
         .await
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-    serde_json::from_str::<BackupConfig>(&content).with_context(|| "Failed to parse config.json")
+    yaml_serde::from_str::<BackupConfig>(&content)
+        .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
 /// Load configuration from a file in the same directory as the executable
@@ -76,9 +77,15 @@ pub async fn load_config() -> Result<BackupConfig> {
     let config_path = home_path
         .join(".config")
         .join("blazebackup")
-        .join("config.json");
+        .join("config.yaml");
 
     load_config_from_file(&config_path).await
+}
+
+pub async fn _save_as_yaml(config: &BackupConfig) -> Result<()> {
+    let yaml = yaml_serde::to_string(config)?;
+    log::debug!("Saving config to YAML:\n{}", yaml);
+    bail!("This method is just for conversion!");
 }
 
 #[cfg(test)]

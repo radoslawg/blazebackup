@@ -20,4 +20,5 @@ tempfile = "3.25.0"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
 walkdir = "2.5.0"
+yaml_serde = "0.10.3"
 
