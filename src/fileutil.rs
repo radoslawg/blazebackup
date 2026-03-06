@@ -3,6 +3,7 @@ use anyhow::Result;
 use sevenz_rust2::ArchiveEntry;
 use sevenz_rust2::SourceReader;
 use simplehash::Fnv1aHasher64;
+use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -84,7 +85,9 @@ pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>>
 
                 hasher.write(&modified.to_ne_bytes());
                 hasher.write(&file_size.to_ne_bytes());
-                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
+                let absolute_path = fs::canonicalize(uentry.path())
+                    .context("Failed to get absolute path for hash calculation")?;
+                hasher.write(absolute_path.to_string_lossy().as_bytes());
                 result.insert(
                     String::from(
                         uentry
@@ -113,6 +116,14 @@ pub fn get_changed_files(
             let mut hasher = Fnv1aHasher64::new();
             let uentry =
                 entry.context("Failed to access directory entry during hash calculation")?;
+            if _changed.contains(&String::from(
+                uentry
+                    .path()
+                    .to_str()
+                    .context("Cannot convert path to String")?,
+            )) {
+                continue;
+            }
             if uentry.file_type().is_file() {
                 let metadata = uentry.metadata()?;
                 let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
@@ -120,7 +131,9 @@ pub fn get_changed_files(
 
                 hasher.write(&modified.to_ne_bytes());
                 hasher.write(&file_size.to_ne_bytes());
-                hasher.write(uentry.path().as_os_str().as_encoded_bytes());
+                let absolute_path = fs::canonicalize(uentry.path())
+                    .context("Failed to get absolute path for hash calculation")?;
+                hasher.write(absolute_path.to_string_lossy().as_bytes());
                 let filename = String::from(
                     uentry
                         .path()
@@ -175,4 +188,149 @@ fn convert_hashmap(original_map: &HashMap<String, String>) -> HashMap<String, (S
         new_map.insert(key.clone(), (value.clone(), false));
     }
     new_map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_calculate_files_hash_basic() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        let mut file = File::create(&file_path)?;
+        writeln!(file, "hello")?;
+
+        let paths = vec![file_path.to_str().unwrap().to_string()];
+        let hashes = calculate_files_hash(&paths)?;
+
+        assert_eq!(hashes.len(), 1);
+        assert!(hashes.contains_key(file_path.to_str().unwrap()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_no_change() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        let mut file = File::create(&file_path)?;
+        writeln!(file, "hello")?;
+
+        let paths = vec![file_path.to_str().unwrap().to_string()];
+        let hashes = calculate_files_hash(&paths)?;
+
+        let (changed, deleted) = get_changed_files(&paths, &hashes)?;
+        assert!(changed.is_none());
+        assert!(deleted.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_new_file() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        File::create(&file_path)?;
+
+        let (changed, deleted) =
+            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &HashMap::new())?;
+        assert!(changed.is_some());
+        assert_eq!(changed.as_ref().unwrap().len(), 1);
+        assert!(deleted.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_deleted() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        File::create(&file_path)?;
+
+        let paths = vec![file_path.to_str().unwrap().to_string()];
+        let hashes = calculate_files_hash(&paths)?;
+
+        fs::remove_file(&file_path)?;
+
+        // Scan the directory that contained the file
+        let (changed, deleted) =
+            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &hashes)?;
+        assert!(changed.is_none());
+        assert!(deleted.is_some());
+        assert_eq!(deleted.as_ref().unwrap().len(), 1);
+        assert_eq!(deleted.as_ref().unwrap()[0], file_path.to_str().unwrap());
+        Ok(())
+    }
+
+    #[test]
+    fn test_compress_sources_basic() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        let mut file = File::create(&file_path)?;
+        writeln!(file, "hello content")?;
+
+        let archive_path = dir.path().join("test.7z");
+        let sources = vec![file_path.to_str().unwrap().to_string()];
+
+        compress_sources(&archive_path, &sources, "password")?;
+
+        assert!(archive_path.exists());
+        assert!(fs::metadata(&archive_path)?.len() > 0);
+        Ok(())
+    }
+
+    // This test exposes a problem: overlapping paths cause duplicates in changed files
+    #[test]
+    fn test_problem_overlapping_paths_duplicates() -> Result<()> {
+        let dir = tempdir()?;
+        let file_path = dir.path().join("test.txt");
+        File::create(&file_path)?;
+
+        let paths = vec![
+            dir.path().to_str().unwrap().to_string(),
+            file_path.to_str().unwrap().to_string(),
+        ];
+
+        // Everything is new
+        let (changed, _) = get_changed_files(&paths, &HashMap::new())?;
+        let changed_files = changed.unwrap();
+
+        // This will FAIL if there are duplicates
+        assert_eq!(
+            changed_files.len(),
+            1,
+            "Expected 1 changed file, but found duplicates: {:?}",
+            changed_files
+        );
+        Ok(())
+    }
+
+    // This test exposes a problem: path representation (./subdir vs subdir) affects hashes
+    #[test]
+    fn test_problem_relative_path_consistency() -> Result<()> {
+        let dir = tempdir()?;
+        let subdir = dir.path().join("subdir");
+        fs::create_dir(&subdir)?;
+        let file_path = subdir.join("test.txt");
+        File::create(&file_path)?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(dir.path())?;
+
+        let hash1 = calculate_files_hash(&["subdir".to_string()])?;
+        let hash2 = calculate_files_hash(&["./subdir".to_string()])?;
+
+        std::env::set_current_dir(original_dir)?;
+
+        let val1 = hash1.values().next().unwrap();
+        let val2 = hash2.values().next().unwrap();
+
+        // This will FAIL because the path itself is part of the hash
+        assert_eq!(
+            val1, val2,
+            "Hashes should be independent of how the root path was specified (./subdir vs subdir)"
+        );
+        Ok(())
+    }
 }
