@@ -109,6 +109,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_normal() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec!["src".to_string()],
@@ -117,15 +118,15 @@ mod tests {
         };
         assert_eq!(
             settings
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .unwrap()
                 .parent()
                 .unwrap(),
-            "/tmp"
+            temp_dir.path()
         );
         assert_eq!(
             settings
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -135,6 +136,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
@@ -143,13 +145,14 @@ mod tests {
         };
         assert!(
             settings
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .is_err()
         );
     }
 
     #[test]
     fn test_output_filename_special_characters() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
@@ -158,15 +161,15 @@ mod tests {
         };
         assert_eq!(
             settings
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .unwrap()
                 .parent()
                 .unwrap(),
-            "/tmp"
+            temp_dir.path()
         );
         assert_eq!(
             settings
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .unwrap()
                 .file_name()
                 .unwrap(),
@@ -176,6 +179,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_expansion() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "testname".to_string(),
             sources: vec![],
@@ -183,7 +187,7 @@ mod tests {
             output_filename: "backup_{name}_{timestamp}.7z".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from("/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         // Verify pattern: backup_testname_YYYYMMDD-HHMMSS.7z
@@ -203,6 +207,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_name_only() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "mybackup".to_string(),
             sources: vec![],
@@ -210,13 +215,14 @@ mod tests {
             output_filename: "{name}.zip".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from("/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         assert_eq!(result.file_name().unwrap(), "mybackup.zip");
     }
 
     #[test]
     fn test_output_filename_timestamp_only() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
@@ -224,7 +230,7 @@ mod tests {
             output_filename: "backup_{timestamp}.zip".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from("/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("backup_"));
@@ -239,6 +245,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_multiple_placeholders() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "prod".to_string(),
             sources: vec![],
@@ -246,7 +253,7 @@ mod tests {
             output_filename: "{name}_{name}_{timestamp}_{name}.zip".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from(&"/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with("prod_prod_"));
@@ -255,6 +262,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_empty_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "".to_string(),
             sources: vec![],
@@ -262,7 +270,7 @@ mod tests {
             output_filename: "{name}_{timestamp}.zip".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from("/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         let filename = result.file_name().unwrap().to_str().unwrap();
         assert!(filename.starts_with('_')); // Empty name results in leading underscore
@@ -270,6 +278,7 @@ mod tests {
 
     #[test]
     fn test_output_filename_special_chars_in_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let settings = BackupSettings {
             name: "my-backup_v1.2".to_string(),
             sources: vec![],
@@ -277,44 +286,42 @@ mod tests {
             output_filename: "{name}.zip".to_string(),
         };
         let result = settings
-            .output_filename(PathBuf::from(&"/tmp").as_path(), None)
+            .output_filename(temp_dir.path(), None)
             .unwrap();
         assert_eq!(result.file_name().unwrap(), "my-backup_v1.2.zip");
     }
 
     #[tokio::test]
     async fn test_load_config_valid() {
-        let json = r#"{
-            "backups": [
-                {
-                    "name": "test_backup",
-                    "sources": ["/home/user/docs"],
-
-                    "output_filename": "docs.zip"
-                }
-            ],
-            "storage": {
-                "bucket": "my-bucket",
-                "key_prefix": "backups/"
-            }
-        }"#;
+        let yaml = r#"
+backups:
+  - name: test_backup
+    sources:
+      - /home/user/docs
+    output_filename: docs.zip
+storage:
+  bucket: my-bucket
+  key_prefix: backups/
+"#;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(json.as_bytes()).unwrap();
+        temp_file.write_all(yaml.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let config = load_config_from_file(temp_file.path()).await.unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         assert_eq!(config.backups.len(), 1);
         assert_eq!(config.backups[0].name, "test_backup");
         assert_eq!(
             config.backups[0]
-                .output_filename(PathBuf::from("/tmp").as_path(), None)
+                .output_filename(temp_dir.path(), None)
                 .unwrap()
                 .file_name()
                 .unwrap(),
             "docs.zip"
         );
     }
+
 
     #[tokio::test]
     async fn test_load_config_missing_file() {
@@ -327,80 +334,68 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_config_malformed_json() {
-        let json = r#"{ invalid json }"#;
+        let yaml = r#"invalid: yaml: ["#;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(json.as_bytes()).unwrap();
+        temp_file.write_all(yaml.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Failed to parse config.json"));
+        assert!(err_msg.contains("Failed to parse"));
     }
 
     #[tokio::test]
     async fn test_load_config_missing_required_field() {
-        let json = r#"{
-            "backups": [
-                {
-                    "name": "test_backup",
-                    "sources": ["/home/user/docs"]
-                }
-            ],
-            "storage": {
-                "bucket": "my-bucket"
-            }
-        }"#;
+        let yaml = r#"
+backups:
+  - name: test_backup
+    sources: ["/home/user/docs"]
+storage:
+  bucket: my-bucket
+"#;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(json.as_bytes()).unwrap();
+        temp_file.write_all(yaml.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Failed to parse config.json"));
+        assert!(err_msg.contains("Failed to parse"));
     }
 
     #[tokio::test]
     async fn test_load_config_empty_json() {
-        let json = r#"{}"#;
+        let yaml = r#""#;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(json.as_bytes()).unwrap();
+        temp_file.write_all(yaml.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let result = load_config_from_file(temp_file.path()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Failed to parse config.json"));
+        assert!(err_msg.contains("Failed to parse"));
     }
 
     #[tokio::test]
     async fn test_load_config_multiple_backups() {
-        let json = r#"{
-            "backups": [
-                {
-                    "name": "backup1",
-                    "sources": ["/path/1"],
-
-                    "output_filename": "file1.zip"
-                },
-                {
-                    "name": "backup2",
-                    "sources": ["/path/2a", "/path/2b"],
-
-                    "output_filename": "file2.zip"
-                }
-            ],
-            "storage": {
-                "bucket": "bucket-name"
-            }
-        }"#;
+        let yaml = r#"
+backups:
+  - name: backup1
+    sources: ["/path/1"]
+    output_filename: file1.zip
+  - name: backup2
+    sources: ["/path/2a", "/path/2b"]
+    output_filename: file2.zip
+storage:
+  bucket: bucket-name
+"#;
 
         let mut temp_file = NamedTempFile::new().unwrap();
-        temp_file.write_all(json.as_bytes()).unwrap();
+        temp_file.write_all(yaml.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let config = load_config_from_file(temp_file.path()).await.unwrap();
@@ -410,3 +405,4 @@ mod tests {
         assert_eq!(config.backups[1].sources.len(), 2);
     }
 }
+

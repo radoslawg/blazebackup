@@ -172,13 +172,12 @@ mod tests {
     fn test_hash_is_deterministic_for_identical_files() -> Result<()> {
         let dir = tempdir()?;
         let path1 = dir.path().join("file1.txt");
-        let path2 = dir.path().join("file1.txt");
 
         create_test_file(&PathBuf::from(&path1), "test content", 50)?;
 
-        let hash1 = calculate_directory_hash(&[path1.to_str().unwrap().to_string()])?;
+        let hash1 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
         sleep(Duration::from_millis(50)); // Wait a bit before creating the second hash
-        let hash2 = calculate_directory_hash(&[path2.to_str().unwrap().to_string()])?;
+        let hash2 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
 
         assert_eq!(
             hash1, hash2,
@@ -193,16 +192,15 @@ mod tests {
         let path = dir.path().join("time_test.txt");
 
         create_test_file(&PathBuf::from(&path), "initial content", 10)?; // Initial creation
-        let hash1 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash1 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
-        sleep(Duration::from_millis(1000)); // We have to wait in worst case one second to make sure
-        // modification time is increased.
+        sleep(Duration::from_millis(1100)); // Wait to ensure modification time is increased.
 
         let mut file = fs::File::create(&path)?;
         file.write_all(b"initial content")?; // Write the same content, but this updates mtime
         file.flush()?;
 
-        let hash2 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash2 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         assert_ne!(
             hash1, hash2,
@@ -217,7 +215,7 @@ mod tests {
         let path = dir.path().join("size_test.txt");
 
         create_test_file(&PathBuf::from(&path), "small", 10)?;
-        let hash1 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash1 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(50)); // Wait to ensure mtime is different
 
@@ -226,7 +224,7 @@ mod tests {
         file.write_all(b"much larger content")?;
         file.flush()?;
 
-        let hash2 = calculate_directory_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash2 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         assert_ne!(hash1, hash2, "Hash should change when file size changes.");
         Ok(())
@@ -239,15 +237,19 @@ mod tests {
         let path2 = dir.path().join("b.txt");
 
         create_test_file(&PathBuf::from(&path1), "content", 10)?;
-        let hash1 = calculate_directory_hash(&[path1.to_str().unwrap().to_string()])?;
+        let hash1 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(50));
 
         // Rename the file - this tests the path being written to the hasher
         fs::rename(&path1, &path2)?;
-        let hash2 = calculate_directory_hash(&[path2.to_str().unwrap().to_string()])?;
+        let hash2 = calculate_files_hash(&[path2.to_str().unwrap().to_string()])?;
 
-        assert_ne!(hash1, hash2, "Hash should change when file path changes.");
+        // We compare the values in the maps
+        let h1_val = hash1.values().next().unwrap();
+        let h2_val = hash2.values().next().unwrap();
+
+        assert_ne!(h1_val, h2_val, "Hash should change when file path changes.");
         Ok(())
     }
 
@@ -267,14 +269,14 @@ mod tests {
             path_a.to_str().unwrap().to_string(),
             path_b.to_str().unwrap().to_string(),
         ];
-        let hash1 = calculate_directory_hash(&paths_sorted_input)?;
+        let hash1 = calculate_files_hash(&paths_sorted_input)?;
 
         // Run hash with paths in reverse order in the input vector
         let paths_reverse_input = vec![
             path_b.to_str().unwrap().to_string(),
             path_a.to_str().unwrap().to_string(),
         ];
-        let hash2 = calculate_directory_hash(&paths_reverse_input)?;
+        let hash2 = calculate_files_hash(&paths_reverse_input)?;
 
         assert_eq!(
             hash1, hash2,
@@ -290,15 +292,16 @@ mod tests {
         fs::create_dir(&hash_target_dir)?;
 
         // File that will be included in the hash
-        create_test_file(&hash_target_dir.join("file_A.txt"), "A", 10)?;
-        let hash1 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        let file_a = hash_target_dir.join("file_A.txt");
+        create_test_file(&file_a, "A", 10)?;
+        let hash1 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         // File outside the hashed directory structure (in the root temp dir)
         let unrelated_file = root_dir.path().join("unrelated.txt");
         create_test_file(&PathBuf::from(&unrelated_file), "unrelated", 10)?;
 
         // Hash again without touching the target directory content
-        let hash2 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        let hash2 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         assert_eq!(
             hash1, hash2,
@@ -306,8 +309,8 @@ mod tests {
         );
 
         // Now modify the file *inside* the hashed directory
-        create_test_file(&hash_target_dir.join("file_A.txt"), "A changed", 10)?;
-        let hash3 = calculate_directory_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        create_test_file(&file_a, "A changed", 10)?;
+        let hash3 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         assert_ne!(
             hash1, hash3,
@@ -315,4 +318,49 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn test_get_changed_files_detects_changes() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("test.txt");
+        create_test_file(&path, "initial", 10)?;
+
+        let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        
+        sleep(Duration::from_millis(1100));
+        
+        // Modify file
+        let mut file = fs::File::create(&path)?;
+        file.write_all(b"modified")?;
+        file.flush()?;
+
+        let (changed, deleted) = get_changed_files(&[path.to_str().unwrap().to_string()], &initial_hashes)?;
+        
+        assert!(changed.is_some());
+        assert_eq!(changed.unwrap().len(), 1);
+        assert!(deleted.is_none());
+        
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_changed_files_detects_deletion() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("test.txt");
+        create_test_file(&path, "initial", 10)?;
+
+        let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        
+        // Delete file
+        fs::remove_file(&path)?;
+
+        let (changed, deleted) = get_changed_files(&[dir.path().to_str().unwrap().to_string()], &initial_hashes)?;
+        
+        assert!(changed.is_none());
+        assert!(deleted.is_some());
+        assert_eq!(deleted.unwrap().len(), 1);
+        
+        Ok(())
+    }
+
 }
