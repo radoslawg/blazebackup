@@ -66,6 +66,19 @@ async fn load_config_from_file(path: &Path) -> Result<BackupConfig> {
         .with_context(|| format!("Failed to parse {}", path.display()))
 }
 
+pub async fn _load_json_config_from_file(path: &Path) -> Result<BackupConfig> {
+    let mut file = File::open(path)
+        .await
+        .with_context(|| format!("Failed to open config file: {}", path.display()))?;
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .await
+        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+    serde_json::from_str::<BackupConfig>(&content)
+        .with_context(|| format!("Failed to parse {}", path.display()))
+}
+
 /// Load configuration from a file in the same directory as the executable
 pub async fn load_config() -> Result<BackupConfig> {
     // Get the path to the current executable
