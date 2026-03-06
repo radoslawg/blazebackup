@@ -41,7 +41,7 @@ pub fn compress_sources(destination: &Path, sources: &[String], password: &str) 
     Ok(())
 }
 
-pub fn calculate_directory_hash(paths: &[String]) -> Result<String> {
+pub fn _calculate_directory_hash(paths: &[String]) -> Result<String> {
     let mut hasher = Fnv1aHasher64::new();
 
     let mut sorted_paths = Vec::from(paths);
