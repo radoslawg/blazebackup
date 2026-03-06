@@ -15,25 +15,21 @@ BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compa
 
 ## Configuration
 
-The application looks for a configuration file at `~/.config/blazebackup/config.json`.
+The application looks for a configuration file at `~/.config/blazebackup/config.yaml`.
 The application maintains state (hashes of previous backups) at `~/.config/blazebackup/state.json`.
 
-### Example `config.json`
+### Example `config.yaml`
 
-```json
-{
-  "backups": [
-    {
-      "name": "work-projects",
-      "sources": ["C:/Users/Name/Documents/Work", "D:/Projects"],
-      "output_filename": "backup_{name}_{timestamp}.7z"
-    }
-  ],
-  "storage": {
-    "bucket": "my-backup-bucket",
-    "key_prefix": "daily"
-  }
-}
+```yaml
+backups:
+  - name: work-projects
+    sources:
+      - C:/Users/Name/Documents/Work
+      - D:/Projects
+    output_filename: backup_{name}_{timestamp}.7z
+storage:
+  bucket: my-backup-bucket
+  key_prefix: daily
 ```
 
 - `output_filename` supports placeholders:
