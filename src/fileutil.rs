@@ -2,6 +2,7 @@ use anyhow::Context;
 use anyhow::Result;
 use async_compression::tokio::write::ZstdEncoder;
 use simplehash::Fnv1aHasher64;
+use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::{collections::HashMap, hash::Hasher};
