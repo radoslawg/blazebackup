@@ -1,46 +1,72 @@
 use anyhow::Context;
 use anyhow::Result;
-use sevenz_rust2::ArchiveEntry;
-use sevenz_rust2::SourceReader;
+use async_compression::tokio::write::ZstdEncoder;
 use simplehash::Fnv1aHasher64;
-use std::fs;
-use std::fs::File;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::{collections::HashMap, hash::Hasher};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+use tokio_tar::Builder;
 use walkdir::WalkDir;
 
-use sevenz_rust2::{ArchiveWriter, encoder_options};
-
-pub fn compress_sources(destination: &Path, sources: &[String], password: &str) -> Result<()> {
+pub async fn compress_sources(
+    destination: &Path,
+    sources: &[String],
+    password: &str,
+) -> Result<()> {
     log::info!("Compressing: {:?}", destination);
-
-    let mut writer = ArchiveWriter::create(destination)
+    let output_file = File::create(destination)
+        .await
         .with_context(|| format!("Failed to create archive at {:?}", destination))?;
-    writer.set_content_methods(vec![
-        encoder_options::AesEncoderOptions::new(password.into()).into(),
-        encoder_options::Lzma2Options::from_level_mt(9, 16, 128 * 1024 * 1024).into(),
-    ]);
 
-    let mut s = Vec::with_capacity(sources.len());
-    let mut r = Vec::with_capacity(sources.len());
-
-    for source in sources {
-        let path = Path::new(source);
-        let reader = File::open(path).with_context(|| format!("Failed to open file {:?}", path))?;
-        let filename = path.to_string_lossy().into_owned();
-
-        s.push(ArchiveEntry::from_path(path, filename));
-        r.push(SourceReader::new(reader));
+    let encoder = ZstdEncoder::new(output_file);
+    let mut tar = Builder::new(encoder);
+    for s in sources {
+        let path = Path::new(s);
+        let mut file = File::open(path)
+            .await
+            .with_context(|| format!("Failed to open file {:?}", path))?;
+        tar.append_file(path, &mut file).await.with_context(|| {
+            format!(
+                "Failed to append file {:?} to archive at {:?}",
+                path, destination
+            )
+        })?;
     }
-
-    writer
-        .push_archive_entries(s, r)
-        .context("Failed to push files to archive")?;
-    writer.finish().context("Failed to Finish archive")?;
-
+    tar.into_inner().await?.shutdown().await?;
     Ok(())
 }
+
+// pub fn compress_sources(destination: &Path, sources: &[String], password: &str) -> Result<()> {
+//     log::info!("Compressing: {:?}", destination);
+//
+//     let mut writer = ArchiveWriter::create(destination)
+//         .with_context(|| format!("Failed to create archive at {:?}", destination))?;
+//     writer.set_content_methods(vec![
+//         encoder_options::AesEncoderOptions::new(password.into()).into(),
+//         encoder_options::Lzma2Options::from_level_mt(9, 16, 128 * 1024 * 1024).into(),
+//     ]);
+//
+//     let mut s = Vec::with_capacity(sources.len());
+//     let mut r = Vec::with_capacity(sources.len());
+//
+//     for source in sources {
+//         let path = Path::new(source);
+//         let reader = File::open(path).with_context(|| format!("Failed to open file {:?}", path))?;
+//         let filename = path.to_string_lossy().into_owned();
+//
+//         s.push(ArchiveEntry::from_path(path, filename));
+//         r.push(SourceReader::new(reader));
+//     }
+//
+//     writer
+//         .push_archive_entries(s, r)
+//         .context("Failed to push files to archive")?;
+//     writer.finish().context("Failed to Finish archive")?;
+//
+//     Ok(())
+// }
 
 pub fn _calculate_directory_hash(paths: &[String]) -> Result<String> {
     let mut hasher = Fnv1aHasher64::new();

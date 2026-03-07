@@ -130,12 +130,12 @@ async fn main() -> Result<()> {
             let sources = changed_files.context("Changed files shoule not be None here")?;
             let password_clone = password.clone();
 
-            tokio::task::spawn_blocking(move || {
-                compress_sources(dest_clone.as_path(), &sources, &password_clone)
+            tokio::task::spawn_blocking(async move || {
+                compress_sources(dest_clone.as_path(), &sources, &password_clone).await
             })
             .await
             .context("Panic in compression task")?
-            .context("Error during compression")?;
+            .await?;
 
             upload_file(dest.as_path(), &storage)
                 .await
