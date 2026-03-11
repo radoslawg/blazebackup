@@ -46,8 +46,6 @@ async fn main() -> Result<()> {
         Err(_) => State { backups: vec![] },
     };
 
-    //log::debug!("{:?}", state);
-
     let zip_password = match std::env::var("ZIP_PASSWORD") {
         Ok(pass) => String::from(pass.trim()),
         Err(_) => String::from(""),
@@ -79,8 +77,8 @@ async fn main() -> Result<()> {
                 (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
                 s.deleted_files = deleted_files.clone().unwrap_or_default();
                 log::info!("Incremental Mode for {}", b.name);
-                log::debug!("Changed files: {:?}", changed_files);
-                log::debug!("Deleted files: {:?}", deleted_files);
+                // log::debug!("Changed files: {:?}", changed_files);
+                // log::debug!("Deleted files: {:?}", deleted_files);
                 if changed_files.is_none() {
                     log::info!("{} - No change detected! No processing", b.name);
                     continue;
@@ -134,8 +132,7 @@ async fn main() -> Result<()> {
                 compress_sources(dest_clone.as_path(), &sources, &password_clone)
             })
             .await
-            .context("Panic in compression task")?
-            .context("Error during compression")?;
+            .context("Panic in compression task")??;
 
             upload_file(dest.as_path(), &storage)
                 .await
@@ -326,20 +323,21 @@ mod tests {
         create_test_file(&path, "initial", 10)?;
 
         let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
-        
+
         sleep(Duration::from_millis(1100));
-        
+
         // Modify file
         let mut file = fs::File::create(&path)?;
         file.write_all(b"modified")?;
         file.flush()?;
 
-        let (changed, deleted) = get_changed_files(&[path.to_str().unwrap().to_string()], &initial_hashes)?;
-        
+        let (changed, deleted) =
+            get_changed_files(&[path.to_str().unwrap().to_string()], &initial_hashes)?;
+
         assert!(changed.is_some());
         assert_eq!(changed.unwrap().len(), 1);
         assert!(deleted.is_none());
-        
+
         Ok(())
     }
 
@@ -350,17 +348,17 @@ mod tests {
         create_test_file(&path, "initial", 10)?;
 
         let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
-        
+
         // Delete file
         fs::remove_file(&path)?;
 
-        let (changed, deleted) = get_changed_files(&[dir.path().to_str().unwrap().to_string()], &initial_hashes)?;
-        
+        let (changed, deleted) =
+            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &initial_hashes)?;
+
         assert!(changed.is_none());
         assert!(deleted.is_some());
         assert_eq!(deleted.unwrap().len(), 1);
-        
+
         Ok(())
     }
-
 }
