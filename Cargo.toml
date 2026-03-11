@@ -4,14 +4,11 @@ version = "0.2.1"
 edition = "2024"
 
 [dependencies]
-age = { version = "0.11.2", features = ["aes", "async", "futures"] }
 anyhow = "1.0.100"
-async-compression = { version = "0.4.41", features = ["tokio", "zstd"] }
 aws-config = { version = "1.8.12", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.119.0"
 chrono = { version = "0.4.43", features = ["now"] }
 dotenv = "0.15.0"
-futures = "0.3.31"
 log = "0.4.29"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -20,7 +17,7 @@ simplelog = "0.12.2"
 tempfile = "3.25.0"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
-tokio-tar = "0.3.1"
 walkdir = "2.5.0"
 yaml_serde = "0.10.3"
+zip = "8.2.0"
 
