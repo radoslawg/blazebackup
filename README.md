@@ -6,7 +6,7 @@ BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compa
 
 ## Features
 
-- **7z Compression**: High-ratio compression using `sevenz-rust2`.
+- **Zip Compression**: High-ratio compression using the `zip` crate with Zstandard (Zstd).
 - **AES-256 Encryption**: Protects your archives with a password.
 - **Parallel Pipeline**: Compresses and uploads multiple backup sets concurrently for maximum efficiency.
 - **S3-Compatible**: Works with any S3-compatible storage provider.
@@ -77,4 +77,4 @@ cargo test
 ## Future
 - [x] Implement state tracking to skip unchanged backups.
 - [ ] Implement restore functionality.
-- [ ] Support partial/incremental uploads (only changed files within a directory).
+- [x] Support partial/incremental uploads (only changed files within a directory).
