@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::{fs::File, io::AsyncReadExt};
 
-const DEFAULT_REPEAT_FULL: u32 = 30;
+const DEFAULT_REPEAT_FULL: i64 = 30;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BackupConfig {
@@ -74,13 +74,13 @@ impl BackupSettings {
         Ok(false)
     }
 
-    pub fn get_repeat_full(&self) -> Result<Option<u32>> {
+    pub fn get_repeat_full(&self) -> Result<Option<i64>> {
         match &self.repeat_full {
             Some(s) => {
                 if s.trim().to_lowercase() == "never" {
                     return Ok(None);
                 }
-                match s.trim().parse::<u32>() {
+                match s.trim().parse::<i64>() {
                     Ok(num) => Ok(Some(num)),
                     Err(_) => bail!("Invalid repeat_full value"),
                 }
