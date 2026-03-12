@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use tokio::{fs::File, io::AsyncReadExt};
 
+const DEFAULT_REPEAT_FULL: u32 = 30;
+
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BackupConfig {
     pub backups: Vec<BackupSettings>,
@@ -16,6 +18,7 @@ pub struct BackupSettings {
     pub name: String,
     pub sources: Vec<String>,
     output_filename: String,
+    repeat_full: Option<String>,
     exclude: Option<Vec<String>>,
 }
 
@@ -69,6 +72,21 @@ impl BackupSettings {
             }
         }
         Ok(false)
+    }
+
+    pub fn get_repeat_full(&self) -> Result<Option<u32>> {
+        match &self.repeat_full {
+            Some(s) => {
+                if s.trim().to_lowercase() == "never" {
+                    return Ok(None);
+                }
+                match s.trim().parse::<u32>() {
+                    Ok(num) => Ok(Some(num)),
+                    Err(_) => bail!("Invalid repeat_full value"),
+                }
+            }
+            None => Ok(Some(DEFAULT_REPEAT_FULL)),
+        }
     }
 }
 
@@ -132,12 +150,71 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
+    fn test_default_repeat() {
+        let settings = BackupSettings {
+            name: "test".to_string(),
+            sources: vec![],
+
+            output_filename: "backup.zip".to_string(),
+            repeat_full: None,
+            exclude: None,
+        };
+        assert_eq!(
+            Some(DEFAULT_REPEAT_FULL),
+            settings.get_repeat_full().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_specified_repeat() {
+        let settings = BackupSettings {
+            name: "test".to_string(),
+            sources: vec![],
+
+            output_filename: "backup.zip".to_string(),
+            repeat_full: Some(String::from("3   ")),
+            exclude: None,
+        };
+        assert_eq!(Some(3), settings.get_repeat_full().unwrap());
+    }
+
+    #[test]
+    fn test_never_repeat() {
+        let settings = BackupSettings {
+            name: "test".to_string(),
+            sources: vec![],
+
+            output_filename: "backup.zip".to_string(),
+            repeat_full: Some(String::from("   NeVeR   ")),
+            exclude: None,
+        };
+        assert_eq!(None, settings.get_repeat_full().unwrap());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_repeat() {
+        let settings = BackupSettings {
+            name: "test".to_string(),
+            sources: vec![],
+
+            output_filename: "backup.zip".to_string(),
+            repeat_full: Some(String::from("   invalido   ")),
+            exclude: None,
+        };
+        let _ = settings
+            .get_repeat_full()
+            .expect("Should panic on invalid repeat_full value");
+    }
+
+    #[test]
     fn test_is_excluded_none() {
         let settings = BackupSettings {
             name: "test".to_string(),
             sources: vec![],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         assert!(!settings.is_excluded("any/path").unwrap());
@@ -150,6 +227,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: Some(vec![String::from("an*")]),
         };
         assert!(settings.is_excluded("any/path").unwrap());
@@ -162,6 +240,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: Some(vec![String::from("**/*an*"), String::from("**/foo*.*")]),
         };
         assert!(settings.is_excluded("any/path").unwrap());
@@ -178,6 +257,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: Some(vec![String::from("**/any/**")]),
         };
         assert!(settings.is_excluded("any/path").unwrap());
@@ -197,6 +277,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: Some(vec![String::from("foo*")]),
         };
         assert!(!settings.is_excluded("any/path").unwrap());
@@ -210,6 +291,7 @@ mod tests {
             sources: vec!["src".to_string()],
 
             output_filename: "backup.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         assert_eq!(
@@ -238,6 +320,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         assert!(settings.output_filename(temp_dir.path(), None).is_err());
@@ -251,6 +334,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup_2024-01-15@14:30:00.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         assert_eq!(
@@ -279,6 +363,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup_{name}_{timestamp}.7z".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
@@ -306,6 +391,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "{name}.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
@@ -320,6 +406,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "backup_{timestamp}.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
@@ -342,6 +429,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "{name}_{name}_{timestamp}_{name}.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
@@ -358,6 +446,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "{name}_{timestamp}.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
@@ -373,6 +462,7 @@ mod tests {
             sources: vec![],
 
             output_filename: "{name}.zip".to_string(),
+            repeat_full: None,
             exclude: None,
         };
         let result = settings.output_filename(temp_dir.path(), None).unwrap();
