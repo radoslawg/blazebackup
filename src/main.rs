@@ -71,8 +71,8 @@ async fn main() -> Result<()> {
         //let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
         // awkward...
-        let mut changed_files: Option<Vec<String>> = Some(vec![]);
-        let mut deleted_files: Option<Vec<String>> = Some(vec![]);
+        let mut changed_files: Option<Vec<String>> = None;
+        let mut deleted_files: Option<Vec<String>> = None;
 
         let mode = match state.backups.iter_mut().find(|s| s.name == b.name) {
             Some(s) => {
@@ -114,10 +114,12 @@ async fn main() -> Result<()> {
         if let BackupMode::Full = mode {
             log::info!("Full mode for {}", b.name);
 
+            let hashes = calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
+                .context("Cannot compute files hashes")?;
+
             let new_state = BackupState {
                 name: b.name.clone(),
-                file_hashes: calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
-                    .context("Cannot compute files hashes")?,
+                file_hashes: hashes.clone(),
                 deleted_files: vec![],
                 last_full_backup: chrono::Utc::now().to_rfc3339(),
             };
@@ -126,6 +128,7 @@ async fn main() -> Result<()> {
                 Some(n) => state.backups[n] = new_state, //in case we already have state.
                 None => state.backups.push(new_state),
             }
+            changed_files = hashes.keys().cloned().collect::<Vec<String>>().into();
         }
 
         let dest = match mode {
