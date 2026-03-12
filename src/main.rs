@@ -70,37 +70,63 @@ async fn main() -> Result<()> {
         let sources: Vec<String> = b.sources.clone();
         //let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
-        let changed_files: Option<Vec<String>>;
-        let deleted_files: Option<Vec<String>>;
+        // awkward...
+        let mut changed_files: Option<Vec<String>> = Some(vec![]);
+        let mut deleted_files: Option<Vec<String>> = Some(vec![]);
+
         let mode = match state.backups.iter_mut().find(|s| s.name == b.name) {
             Some(s) => {
-                (changed_files, deleted_files) =
-                    get_changed_files_exclusion(&sources, &s.file_hashes, |s| b.is_excluded(s))?;
-                s.deleted_files = deleted_files.clone().unwrap_or_default();
-                log::info!("Incremental Mode for {}", b.name);
-                // log::debug!("Changed files: {:?}", changed_files);
-                // log::debug!("Deleted files: {:?}", s.deleted_files);
-                if changed_files.is_none() {
-                    log::info!("{} - No change detected! No processing", b.name);
-                    continue;
+                let repeat = b
+                    .get_repeat_full()
+                    .context("Cannot get repeat_full value")?;
+
+                if repeat.is_some()
+                    && (s
+                        .last_full_backup
+                        .parse::<chrono::DateTime<chrono::Utc>>()
+                        .unwrap_or_else(|_| chrono::Utc::now())
+                        + chrono::Duration::days(repeat.unwrap()))
+                        < chrono::Utc::now()
+                {
+                    log::info!(
+                        "Full backup interval exceeded for {}. Performing full backup.",
+                        b.name
+                    );
+                    BackupMode::Full
+                } else {
+                    (changed_files, deleted_files) =
+                        get_changed_files_exclusion(&sources, &s.file_hashes, |s| {
+                            b.is_excluded(s)
+                        })?;
+                    s.deleted_files = deleted_files.clone().unwrap_or_default();
+                    log::info!("Incremental Mode for {}", b.name);
+                    // log::debug!("Changed files: {:?}", changed_files);
+                    // log::debug!("Deleted files: {:?}", s.deleted_files);
+                    if changed_files.is_none() && deleted_files.is_none() {
+                        log::info!("{} - No change detected! No processing", b.name);
+                        continue;
+                    }
+                    BackupMode::Incremental
                 }
-                BackupMode::Incremental
             }
-            None => {
-                log::info!("Full mode for {}", b.name);
-                let files_hash = calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
-                    .context("Cannot compute files hashes")?;
-                changed_files = Some(files_hash.keys().cloned().collect());
-                deleted_files = None;
-                state.backups.push(BackupState {
-                    name: b.name.clone(),
-                    hash: String::from(""),
-                    file_hashes: files_hash,
-                    deleted_files: vec![],
-                });
-                BackupMode::Full
-            }
+            None => BackupMode::Full,
         };
+        if let BackupMode::Full = mode {
+            log::info!("Full mode for {}", b.name);
+
+            let new_state = BackupState {
+                name: b.name.clone(),
+                file_hashes: calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
+                    .context("Cannot compute files hashes")?,
+                deleted_files: vec![],
+                last_full_backup: chrono::Utc::now().to_rfc3339(),
+            };
+
+            match state.backups.iter().position(|s| s.name == b.name) {
+                Some(n) => state.backups[n] = new_state, //in case we already have state.
+                None => state.backups.push(new_state),
+            }
+        }
 
         let dest = match mode {
             BackupMode::Incremental => b

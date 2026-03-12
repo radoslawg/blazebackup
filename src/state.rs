@@ -12,9 +12,9 @@ pub struct State {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BackupState {
     pub name: String,
-    pub hash: String,
     pub file_hashes: HashMap<String, String>,
     pub deleted_files: Vec<String>,
+    pub last_full_backup: String,
 }
 
 pub async fn load_state() -> Result<State> {
