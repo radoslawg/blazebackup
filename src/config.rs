@@ -103,13 +103,18 @@ pub async fn load_config() -> Result<BackupConfig> {
     // Get the path to the current executable
     // let exe_path = std::env::current_exe().context("Failed to get executable path")?;
 
-    let home_path = std::env::home_dir().context("Failed to find Home dir")?;
+    let config_path = match std::env::var("BLAZEBACKUP_CONFIG") {
+        Ok(file) => PathBuf::from(file),
+        Err(_) => {
+            let home_path = std::env::home_dir().context("Failed to find Home dir")?;
 
-    // Construct path to config.json in the same directory
-    let config_path = home_path
-        .join(".config")
-        .join("blazebackup")
-        .join("config.yaml");
+            // Construct path to config.json in the same directory
+            home_path
+                .join(".config")
+                .join("blazebackup")
+                .join("config.yaml")
+        }
+    };
 
     load_config_from_file(&config_path).await
 }
