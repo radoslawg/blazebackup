@@ -12,10 +12,13 @@ BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compa
 - **S3-Compatible**: Works with any S3-compatible storage provider.
 - **Smart Change Detection**: Skips backups if source directory contents haven't changed since the last successful run, saving bandwidth and storage.
 - **Deterministic Hashing**: Calculates directory hashes to uniquely identify states.
+- **Exclude Patterns**: Support for glob-style patterns to exclude specific files or directories from backups.
 
 ## Configuration
 
-The application looks for a configuration file at `~/.config/blazebackup/config.yaml`.
+The application looks for a configuration file at `~/.config/blazebackup/config.yaml` by default.
+You can override this location by setting the `BLAZEBACKUP_CONFIG` environment variable.
+
 The application maintains state (hashes of previous backups) at `~/.config/blazebackup/state.json`.
 
 ### Example `config.yaml`
@@ -26,6 +29,10 @@ backups:
     sources:
       - C:/Users/Name/Documents/Work
       - D:/Projects
+    exclude:
+      - "**/node_modules/**"
+      - "**/target/**"
+      - "*.tmp"
     output_filename: backup_{name}_{timestamp}.7z
 storage:
   bucket: my-backup-bucket
@@ -46,6 +53,7 @@ The following variables should be defined in a `.env` file or your system enviro
 - `AWS_ENDPOINT_URL`: The custom endpoint (essential for providers like Backblaze B2).
 - `ZIP_PASSWORD`: Password used for 7z AES encryption.
 - `COMPRESSION_DIR`: Temporary directory used for compression before upload (defaults to `d:/temp`).
+- `BLAZEBACKUP_CONFIG`: (Optional) Custom path to the `config.yaml` file.
 
 ## Build and Usage
 
