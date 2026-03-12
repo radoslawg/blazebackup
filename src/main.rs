@@ -116,7 +116,6 @@ async fn main() -> Result<()> {
 
             let new_state = BackupState {
                 name: b.name.clone(),
-                hash: String::from(""),
                 file_hashes: calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
                     .context("Cannot compute files hashes")?,
                 deleted_files: vec![],
