@@ -97,6 +97,7 @@ async fn main() -> Result<()> {
                     hash: String::from(""),
                     file_hashes: files_hash,
                     deleted_files: vec![],
+                    last_full_backup: chrono::Utc::now().to_rfc3339(),
                 });
                 BackupMode::Full
             }
