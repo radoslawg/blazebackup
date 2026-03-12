@@ -56,7 +56,17 @@ pub fn _calculate_directory_hash(paths: &[String]) -> Result<String> {
     Ok(format!("{:x}", hasher.finish_raw()))
 }
 
-pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>> {
+pub fn _calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>> {
+    calculate_files_hash_exclusion(paths, |_| Ok(false))
+}
+
+pub fn calculate_files_hash_exclusion<F>(
+    paths: &[String],
+    is_excluded: F,
+) -> Result<HashMap<String, String>>
+where
+    F: Fn(&str) -> Result<bool>,
+{
     let mut result = HashMap::new();
 
     let mut sorted_paths = Vec::from(paths);
@@ -69,6 +79,9 @@ pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>>
             let uentry =
                 entry.context("Failed to access directory entry during hash calculation")?;
             if uentry.file_type().is_file() {
+                if is_excluded(uentry.path().to_str().context("Cannot get path string")?)? {
+                    continue;
+                }
                 let metadata = uentry.metadata()?;
                 let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
                 let file_size = metadata.len();
@@ -93,10 +106,21 @@ pub fn calculate_files_hash(paths: &[String]) -> Result<HashMap<String, String>>
     Ok(result)
 }
 
-pub fn get_changed_files(
+pub fn _get_changed_files(
     paths: &[String],
     hashes: &HashMap<String, String>,
 ) -> Result<(Option<Vec<String>>, Option<Vec<String>>)> {
+    get_changed_files_exclusion(paths, hashes, |_| Ok(false))
+}
+
+pub fn get_changed_files_exclusion<F>(
+    paths: &[String],
+    hashes: &HashMap<String, String>,
+    is_excluded: F,
+) -> Result<(Option<Vec<String>>, Option<Vec<String>>)>
+where
+    F: Fn(&str) -> Result<bool>,
+{
     let mut _changed = Vec::new();
     let mut _deleted = Vec::new();
     let mut traced_map = convert_hashmap(hashes);
@@ -115,6 +139,9 @@ pub fn get_changed_files(
                 continue;
             }
             if uentry.file_type().is_file() {
+                if is_excluded(uentry.path().to_str().context("Cannot get path string")?)? {
+                    continue;
+                }
                 let metadata = uentry.metadata()?;
                 let modified = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
                 let file_size = metadata.len();
@@ -195,7 +222,7 @@ mod tests {
         writeln!(file, "hello")?;
 
         let paths = vec![file_path.to_str().unwrap().to_string()];
-        let hashes = calculate_files_hash(&paths)?;
+        let hashes = _calculate_files_hash(&paths)?;
 
         assert_eq!(hashes.len(), 1);
         assert!(hashes.contains_key(file_path.to_str().unwrap()));
@@ -210,9 +237,9 @@ mod tests {
         writeln!(file, "hello")?;
 
         let paths = vec![file_path.to_str().unwrap().to_string()];
-        let hashes = calculate_files_hash(&paths)?;
+        let hashes = _calculate_files_hash(&paths)?;
 
-        let (changed, deleted) = get_changed_files(&paths, &hashes)?;
+        let (changed, deleted) = _get_changed_files(&paths, &hashes)?;
         assert!(changed.is_none());
         assert!(deleted.is_none());
         Ok(())
@@ -225,7 +252,7 @@ mod tests {
         File::create(&file_path)?;
 
         let (changed, deleted) =
-            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &HashMap::new())?;
+            _get_changed_files(&[dir.path().to_str().unwrap().to_string()], &HashMap::new())?;
         assert!(changed.is_some());
         assert_eq!(changed.as_ref().unwrap().len(), 1);
         assert!(deleted.is_none());
@@ -239,13 +266,13 @@ mod tests {
         File::create(&file_path)?;
 
         let paths = vec![file_path.to_str().unwrap().to_string()];
-        let hashes = calculate_files_hash(&paths)?;
+        let hashes = _calculate_files_hash(&paths)?;
 
         fs::remove_file(&file_path)?;
 
         // Scan the directory that contained the file
         let (changed, deleted) =
-            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &hashes)?;
+            _get_changed_files(&[dir.path().to_str().unwrap().to_string()], &hashes)?;
         assert!(changed.is_none());
         assert!(deleted.is_some());
         assert_eq!(deleted.as_ref().unwrap().len(), 1);
@@ -283,7 +310,7 @@ mod tests {
         ];
 
         // Everything is new
-        let (changed, _) = get_changed_files(&paths, &HashMap::new())?;
+        let (changed, _) = _get_changed_files(&paths, &HashMap::new())?;
         let changed_files = changed.unwrap();
 
         // This will FAIL if there are duplicates
@@ -308,8 +335,8 @@ mod tests {
         let original_dir = std::env::current_dir()?;
         std::env::set_current_dir(dir.path())?;
 
-        let hash1 = calculate_files_hash(&["subdir".to_string()])?;
-        let hash2 = calculate_files_hash(&["./subdir".to_string()])?;
+        let hash1 = _calculate_files_hash(&["subdir".to_string()])?;
+        let hash2 = _calculate_files_hash(&["./subdir".to_string()])?;
 
         std::env::set_current_dir(original_dir)?;
 

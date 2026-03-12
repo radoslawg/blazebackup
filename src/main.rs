@@ -67,18 +67,19 @@ async fn main() -> Result<()> {
 
     let mut tasks = JoinSet::new();
     for b in config.backups.iter() {
-        let sources = b.sources.clone();
+        let sources: Vec<String> = b.sources.clone();
         //let backup_hash = calculate_directory_hash(&sources).context("Cannot compute hash")?;
 
         let changed_files: Option<Vec<String>>;
         let deleted_files: Option<Vec<String>>;
         let mode = match state.backups.iter_mut().find(|s| s.name == b.name) {
             Some(s) => {
-                (changed_files, deleted_files) = get_changed_files(&sources, &s.file_hashes)?;
-                s.deleted_files = deleted_files.clone().unwrap_or_default();
+                (changed_files, deleted_files) =
+                    get_changed_files_exclusion(&sources, &s.file_hashes, |s| b.is_excluded(s))?;
+                s.deleted_files = deleted_files.unwrap_or_default();
                 log::info!("Incremental Mode for {}", b.name);
                 // log::debug!("Changed files: {:?}", changed_files);
-                // log::debug!("Deleted files: {:?}", deleted_files);
+                // log::debug!("Deleted files: {:?}", s.deleted_files);
                 if changed_files.is_none() {
                     log::info!("{} - No change detected! No processing", b.name);
                     continue;
@@ -87,8 +88,8 @@ async fn main() -> Result<()> {
             }
             None => {
                 log::info!("Full mode for {}", b.name);
-                let files_hash =
-                    calculate_files_hash(&sources).context("Cannot compute files hashes")?;
+                let files_hash = calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
+                    .context("Cannot compute files hashes")?;
                 changed_files = Some(files_hash.keys().cloned().collect());
                 state.backups.push(BackupState {
                     name: b.name.clone(),
@@ -172,9 +173,9 @@ mod tests {
 
         create_test_file(&PathBuf::from(&path1), "test content", 50)?;
 
-        let hash1 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
+        let hash1 = _calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
         sleep(Duration::from_millis(50)); // Wait a bit before creating the second hash
-        let hash2 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
+        let hash2 = _calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
 
         assert_eq!(
             hash1, hash2,
@@ -189,7 +190,7 @@ mod tests {
         let path = dir.path().join("time_test.txt");
 
         create_test_file(&PathBuf::from(&path), "initial content", 10)?; // Initial creation
-        let hash1 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash1 = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(1100)); // Wait to ensure modification time is increased.
 
@@ -197,7 +198,7 @@ mod tests {
         file.write_all(b"initial content")?; // Write the same content, but this updates mtime
         file.flush()?;
 
-        let hash2 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash2 = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         assert_ne!(
             hash1, hash2,
@@ -212,7 +213,7 @@ mod tests {
         let path = dir.path().join("size_test.txt");
 
         create_test_file(&PathBuf::from(&path), "small", 10)?;
-        let hash1 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash1 = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(50)); // Wait to ensure mtime is different
 
@@ -221,7 +222,7 @@ mod tests {
         file.write_all(b"much larger content")?;
         file.flush()?;
 
-        let hash2 = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let hash2 = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         assert_ne!(hash1, hash2, "Hash should change when file size changes.");
         Ok(())
@@ -234,13 +235,13 @@ mod tests {
         let path2 = dir.path().join("b.txt");
 
         create_test_file(&PathBuf::from(&path1), "content", 10)?;
-        let hash1 = calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
+        let hash1 = _calculate_files_hash(&[path1.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(50));
 
         // Rename the file - this tests the path being written to the hasher
         fs::rename(&path1, &path2)?;
-        let hash2 = calculate_files_hash(&[path2.to_str().unwrap().to_string()])?;
+        let hash2 = _calculate_files_hash(&[path2.to_str().unwrap().to_string()])?;
 
         // We compare the values in the maps
         let h1_val = hash1.values().next().unwrap();
@@ -266,14 +267,14 @@ mod tests {
             path_a.to_str().unwrap().to_string(),
             path_b.to_str().unwrap().to_string(),
         ];
-        let hash1 = calculate_files_hash(&paths_sorted_input)?;
+        let hash1 = _calculate_files_hash(&paths_sorted_input)?;
 
         // Run hash with paths in reverse order in the input vector
         let paths_reverse_input = vec![
             path_b.to_str().unwrap().to_string(),
             path_a.to_str().unwrap().to_string(),
         ];
-        let hash2 = calculate_files_hash(&paths_reverse_input)?;
+        let hash2 = _calculate_files_hash(&paths_reverse_input)?;
 
         assert_eq!(
             hash1, hash2,
@@ -291,14 +292,14 @@ mod tests {
         // File that will be included in the hash
         let file_a = hash_target_dir.join("file_A.txt");
         create_test_file(&file_a, "A", 10)?;
-        let hash1 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        let hash1 = _calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         // File outside the hashed directory structure (in the root temp dir)
         let unrelated_file = root_dir.path().join("unrelated.txt");
         create_test_file(&PathBuf::from(&unrelated_file), "unrelated", 10)?;
 
         // Hash again without touching the target directory content
-        let hash2 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        let hash2 = _calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         assert_eq!(
             hash1, hash2,
@@ -307,7 +308,7 @@ mod tests {
 
         // Now modify the file *inside* the hashed directory
         create_test_file(&file_a, "A changed", 10)?;
-        let hash3 = calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
+        let hash3 = _calculate_files_hash(&[hash_target_dir.to_str().unwrap().to_string()])?;
 
         assert_ne!(
             hash1, hash3,
@@ -322,7 +323,7 @@ mod tests {
         let path = dir.path().join("test.txt");
         create_test_file(&path, "initial", 10)?;
 
-        let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let initial_hashes = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         sleep(Duration::from_millis(1100));
 
@@ -332,7 +333,7 @@ mod tests {
         file.flush()?;
 
         let (changed, deleted) =
-            get_changed_files(&[path.to_str().unwrap().to_string()], &initial_hashes)?;
+            _get_changed_files(&[path.to_str().unwrap().to_string()], &initial_hashes)?;
 
         assert!(changed.is_some());
         assert_eq!(changed.unwrap().len(), 1);
@@ -347,13 +348,13 @@ mod tests {
         let path = dir.path().join("test.txt");
         create_test_file(&path, "initial", 10)?;
 
-        let initial_hashes = calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
+        let initial_hashes = _calculate_files_hash(&[path.to_str().unwrap().to_string()])?;
 
         // Delete file
         fs::remove_file(&path)?;
 
         let (changed, deleted) =
-            get_changed_files(&[dir.path().to_str().unwrap().to_string()], &initial_hashes)?;
+            _get_changed_files(&[dir.path().to_str().unwrap().to_string()], &initial_hashes)?;
 
         assert!(changed.is_none());
         assert!(deleted.is_some());
