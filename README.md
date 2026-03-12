@@ -2,24 +2,26 @@
 
 ![Build Workflow](https://git.grzanka.org/radoslawg/blazebackup/actions/workflows/build.yaml/badge.svg)
 
-BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compatible storage (e.g., Backblaze B2, AWS S3). It compresses specified source directories into 7z archives with AES-256 encryption and uploads them in a parallelized pipeline.
+BlazeBackup is a Rust-based utility for automated, encrypted backups to S3-compatible storage (e.g., Backblaze B2, AWS S3). It compresses specified source directories into archives with AES-256 encryption and uploads them in a parallelized pipeline.
 
 ## Features
 
-- **Zip Compression**: High-ratio compression using the `zip` crate with Zstandard (Zstd).
-- **AES-256 Encryption**: Protects your archives with a password.
-- **Parallel Pipeline**: Compresses and uploads multiple backup sets concurrently for maximum efficiency.
-- **S3-Compatible**: Works with any S3-compatible storage provider.
-- **Smart Change Detection**: Skips backups if source directory contents haven't changed since the last successful run, saving bandwidth and storage.
-- **Deterministic Hashing**: Calculates directory hashes to uniquely identify states.
-- **Exclude Patterns**: Support for glob-style patterns to exclude specific files or directories from backups.
+- **Incremental Backups**: Smart change detection ensures only new or modified files are uploaded, saving bandwidth and storage.
+- **Automated Full Backups**: Automatically triggers a full backup after a configurable interval (default: 30 days) to ensure data integrity.
+- **Zip Compression (Zstd)**: High-ratio compression using Zstandard (level 9) for smaller archive sizes.
+- **AES-256 Encryption**: All archives are protected with AES-256 encryption using a user-defined password.
+- **Parallel Pipeline**: Multiple backup sets are processed and uploaded concurrently using an asynchronous tokio-based pipeline.
+- **S3-Compatible**: Seamlessly works with any S3-compatible storage provider (AWS S3, Backblaze B2, MinIO, etc.).
+- **Deletion Tracking**: Generates a `backblaze_deleted.sh` script within archives to track files deleted since the last backup.
+- **Exclude Patterns**: Robust support for glob-style patterns to exclude specific files or directories (e.g., `node_modules`, `target`, `*.tmp`).
+- **Flexible Filenaming**: Support for placeholders like `{name}` and `{timestamp}` in output filenames.
 
 ## Configuration
 
 The application looks for a configuration file at `~/.config/blazebackup/config.yaml` by default.
 You can override this location by setting the `BLAZEBACKUP_CONFIG` environment variable.
 
-The application maintains state (hashes of previous backups) at `~/.config/blazebackup/state.json`.
+The application maintains state (hashes of previous backups, timestamps) at `~/.config/blazebackup/state.json`.
 
 ### Example `config.yaml`
 
@@ -34,6 +36,7 @@ backups:
       - "**/target/**"
       - "*.tmp"
     output_filename: backup_{name}_{timestamp}.7z
+    repeat_full: "30" # Days between full backups. Use "never" for incremental-only.
 storage:
   bucket: my-backup-bucket
   key_prefix: daily
@@ -51,8 +54,8 @@ The following variables should be defined in a `.env` file or your system enviro
 - `AWS_SECRET_ACCESS_KEY`: Your S3 secret key.
 - `AWS_REGION`: The region for your bucket.
 - `AWS_ENDPOINT_URL`: The custom endpoint (essential for providers like Backblaze B2).
-- `ZIP_PASSWORD`: Password used for 7z AES encryption.
-- `COMPRESSION_DIR`: Temporary directory used for compression before upload (defaults to `d:/temp`).
+- `ZIP_PASSWORD`: Password used for AES-256 encryption.
+- `COMPRESSION_DIR`: Temporary directory used for compression before upload (defaults to system temp).
 - `BLAZEBACKUP_CONFIG`: (Optional) Custom path to the `config.yaml` file.
 
 ## Build and Usage
