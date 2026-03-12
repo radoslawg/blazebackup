@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
             Some(s) => {
                 (changed_files, deleted_files) =
                     get_changed_files_exclusion(&sources, &s.file_hashes, |s| b.is_excluded(s))?;
-                s.deleted_files = deleted_files.unwrap_or_default();
+                s.deleted_files = deleted_files.clone().unwrap_or_default();
                 log::info!("Incremental Mode for {}", b.name);
                 // log::debug!("Changed files: {:?}", changed_files);
                 // log::debug!("Deleted files: {:?}", s.deleted_files);
@@ -91,6 +91,7 @@ async fn main() -> Result<()> {
                 let files_hash = calculate_files_hash_exclusion(&sources, |s| b.is_excluded(s))
                     .context("Cannot compute files hashes")?;
                 changed_files = Some(files_hash.keys().cloned().collect());
+                deleted_files = None;
                 state.backups.push(BackupState {
                     name: b.name.clone(),
                     hash: String::from(""),
@@ -130,7 +131,12 @@ async fn main() -> Result<()> {
             let password_clone = password.clone();
 
             tokio::task::spawn_blocking(move || {
-                compress_sources(dest_clone.as_path(), &sources, &password_clone)
+                compress_sources(
+                    dest_clone.as_path(),
+                    &sources,
+                    &password_clone,
+                    &deleted_files,
+                )
             })
             .await
             .context("Panic in compression task")??;

@@ -3,6 +3,7 @@ use anyhow::Result;
 use simplehash::Fnv1aHasher64;
 use std::fs;
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 use std::{collections::HashMap, hash::Hasher};
@@ -11,7 +12,12 @@ use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-pub fn compress_sources(destination: &Path, sources: &[String], password: &str) -> Result<()> {
+pub fn compress_sources(
+    destination: &Path,
+    sources: &[String],
+    password: &str,
+    deleted_files: &Option<Vec<String>>,
+) -> Result<()> {
     log::info!("Compressing: {:?}", destination);
     let output = File::create(destination)?;
     let mut archive = ZipWriter::new(output);
@@ -20,6 +26,13 @@ pub fn compress_sources(destination: &Path, sources: &[String], password: &str) 
         .compression_method(CompressionMethod::ZSTD)
         .compression_level(Some(9))
         .with_aes_encryption(zip::AesMode::Aes256, password);
+
+    if let Some(deleted) = deleted_files {
+        archive.start_file("backblaze_deleted.sh", options)?;
+        archive.write_all("#!/bin/sh\n".as_bytes())?;
+        let script: String = deleted.iter().map(|f| format!("rm  '{}'\n", f)).collect();
+        archive.write_all(script.as_bytes())?;
+    }
 
     for s in sources {
         let path = Path::new(s);
@@ -290,7 +303,7 @@ mod tests {
         let archive_path = dir.path().join("test.7z");
         let sources = vec![file_path.to_str().unwrap().to_string()];
 
-        compress_sources(&archive_path, &sources, "password")?;
+        compress_sources(&archive_path, &sources, "password", &None)?;
 
         assert!(archive_path.exists());
         assert!(fs::metadata(&archive_path)?.len() > 0);
