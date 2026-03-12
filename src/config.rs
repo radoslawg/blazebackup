@@ -208,6 +208,22 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn test_empty_repeat() {
+        let settings = BackupSettings {
+            name: "test".to_string(),
+            sources: vec![],
+
+            output_filename: "backup.zip".to_string(),
+            repeat_full: Some(String::from("")),
+            exclude: None,
+        };
+        let _ = settings
+            .get_repeat_full()
+            .expect("Should panic on empty repeat_full value");
+    }
+
+    #[test]
     fn test_is_excluded_none() {
         let settings = BackupSettings {
             name: "test".to_string(),
