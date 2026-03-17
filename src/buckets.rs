@@ -20,8 +20,9 @@ pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Re
         String::from(filename.to_str().context("Cannot convert to str")?)
     );
     log::debug!("Uploading: {}", destination);
-    let file_size = tokio::fs::File::open(filename)
-        .await?
+    let file_size = tokio::fs::File::open(filepath)
+        .await
+        .with_context(|| format!("Cannot open file: {:?}", filepath))?
         .metadata()
         .await?
         .len();
@@ -42,7 +43,11 @@ async fn upload_to_bucket_multipart(
     bucket_name: &String,
     destination: &String,
 ) -> Result<()> {
-    log::debug!("Uploading with multipart: {}", destination);
+    log::info!(
+        "Uploading with multipart: {:?} -> {}",
+        filename,
+        destination
+    );
     let config = aws_config::from_env().load().await;
     let client = aws_sdk_s3::Client::new(&config);
 
@@ -131,6 +136,11 @@ async fn upload_to_bucket(
     bucket_name: &String,
     destination: &String,
 ) -> Result<()> {
+    log::info!(
+        "Uploading with single upload: {:?} -> {}",
+        filename,
+        destination
+    );
     // Load the AWS configuration.
     // `aws_config::from_env()` builds a configuration based on environment variables
     // (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION).
@@ -139,8 +149,10 @@ async fn upload_to_bucket(
 
     let mut buffer = Vec::new();
     {
-        let mut file = File::open(filename).await.expect("Ok");
-        file.read_to_end(&mut buffer).await.expect("Read file ok");
+        let mut file = File::open(filename).await.context("Cannot open file")?;
+        file.read_to_end(&mut buffer)
+            .await
+            .context("Cannot read file")?;
     }
 
     client
