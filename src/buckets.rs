@@ -26,7 +26,7 @@ pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Re
         .await?
         .len();
 
-    if file_size > CHUNK_SIZE as u64 {
+    if file_size > MIN_CHUNK_SIZE as u64 {
         upload_to_bucket_multipart(filepath, &configuration.bucket, &destination).await?;
     } else {
         upload_to_bucket(filepath, &configuration.bucket, &destination).await?;
@@ -34,7 +34,7 @@ pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Re
     Ok(())
 }
 
-const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+const MIN_CHUNK_SIZE: usize = 20 * 1024 * 1024; // 5 MB is minimum chunksize required by Backblaze                                            
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/rustv1/examples/s3/src/bin/s3-multipart-upload.rs#L48
 async fn upload_to_bucket_multipart(
@@ -62,14 +62,23 @@ async fn upload_to_bucket_multipart(
     let mut uploaded_bytes = 0;
 
     while uploaded_bytes < file_size {
-        let mut buffer = vec![0u8; CHUNK_SIZE];
-        let bytes_read = file.read(&mut buffer).await?;
-        if bytes_read == 0 {
-            break;
-        }
+        let mut buffer = Vec::new();
+        let mut total_bytes_read = 0;
+        while total_bytes_read < MIN_CHUNK_SIZE {
+            let mut temp_buffer = vec![0u8; MIN_CHUNK_SIZE];
+            let bytes_read = file.read(&mut temp_buffer).await?;
+            if bytes_read == 0 {
+                break;
+            }
 
-        if bytes_read < CHUNK_SIZE {
-            buffer.truncate(bytes_read);
+            if bytes_read < MIN_CHUNK_SIZE {
+                temp_buffer.truncate(bytes_read);
+            }
+            total_bytes_read += bytes_read;
+            buffer.extend_from_slice(&temp_buffer);
+        }
+        if total_bytes_read == 0 {
+            break;
         }
 
         let stream = ByteStream::from(buffer);
@@ -77,7 +86,7 @@ async fn upload_to_bucket_multipart(
         log::debug!(
             "Uploading part {} ({} bytes) for {}",
             part_number,
-            bytes_read,
+            total_bytes_read,
             destination
         );
 
@@ -98,7 +107,7 @@ async fn upload_to_bucket_multipart(
                 .build(),
         );
 
-        uploaded_bytes += bytes_read as u64;
+        uploaded_bytes += total_bytes_read as u64;
         part_number += 1;
     }
     let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
