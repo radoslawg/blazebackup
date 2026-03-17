@@ -1,0 +1,75 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 3 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: blazebackup
+            asset_name: blazebackup-linux-x86_64
+          - os: windows-latest
+            artifact_name: blazebackup.exe
+            asset_name: blazebackup-windows-x86_64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (Nightly)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build Project
+        run: cargo build --release
+
+      - name: Prepare Binary
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/release/${{ matrix.artifact_name }} staging/${{ matrix.asset_name }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: staging/${{ matrix.asset_name }}
+
+  publish:
+    name: Publish Nightly
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Update Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly Build"
+          body: |
+            ### 🌙 Nightly Rolling Build
+            This release is automatically updated every day at 03:00 UTC with the latest changes from the master branch.
+            
+            **Warning:** These builds are experimental and may be unstable.
+            
+            **Last Updated:** ${{ github.event.repository.updated_at || github.event.head_commit.timestamp }}
+            **Commit:** `${{ github.sha }}`
+          prerelease: true
+          make_latest: false
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
