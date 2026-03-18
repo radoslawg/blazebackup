@@ -9,6 +9,8 @@ use tokio::{fs::File, io::AsyncReadExt};
 
 use crate::config::StorageSettings;
 
+const MIN_CHUNK_SIZE: usize = 20 * 1024 * 1024; // 5 MB is minimum chunksize required by Backblaze
+
 pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Result<()> {
     get_bucket(&configuration.bucket)
         .await
@@ -34,8 +36,6 @@ pub async fn upload_file(filepath: &Path, configuration: &StorageSettings) -> Re
     }
     Ok(())
 }
-
-const MIN_CHUNK_SIZE: usize = 20 * 1024 * 1024; // 5 MB is minimum chunksize required by Backblaze                                            
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/rustv1/examples/s3/src/bin/s3-multipart-upload.rs#L48
 async fn upload_to_bucket_multipart(
