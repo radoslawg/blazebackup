@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
-        uses: https://github.com/christopherHX/gitea-download-artifact@v4/download-artifact
+        uses: https://github.com/christopherHX/gitea-download-artifact@v4
         with:
           path: artifacts
 
