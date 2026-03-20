@@ -55,6 +55,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Delete existing nightly release
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Update Nightly Release
         uses: softprops/action-gh-release@v2
         with:
