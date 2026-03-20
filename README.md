@@ -85,7 +85,3 @@ cargo run
 cargo test
 ```
 
-## Future
-- [x] Implement state tracking to skip unchanged backups.
-- [ ] Implement restore functionality.
-- [x] Support partial/incremental uploads (only changed files within a directory).
