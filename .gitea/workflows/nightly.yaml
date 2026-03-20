@@ -76,50 +76,58 @@ jobs:
           GITEA_SERVER_URL: ${{ gitea.server_url }}
           REPO: ${{ gitea.repository }}
         run: |
+          set -e
           TAG="nightly"
           
-          # Delete existing release if it exists
-          RELEASE_ID=$(curl -s -H "Authorization: token ${GITEA_TOKEN}" \
-            "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          echo "Checking for existing release with tag: $TAG"
+          # Get existing release ID if it exists
+          RELEASE_INFO=$(curl -s -H "Authorization: token ${GITEA_TOKEN}" \
+            "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}")
           
-          if [ ! -z "$RELEASE_ID" ]; then
+          RELEASE_ID=$(echo "$RELEASE_INFO" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2 || true)
+          
+          if [ ! -z "$RELEASE_ID" ] && [ "$RELEASE_ID" != "null" ]; then
             echo "Deleting existing nightly release ID: $RELEASE_ID"
             curl -s -X DELETE -H "Authorization: token ${GITEA_TOKEN}" \
               "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}"
           fi
           
-          # Delete tag if it exists
+          # Delete tag if it exists (Gitea might keep it)
+          echo "Deleting tag if it exists..."
           curl -s -X DELETE -H "Authorization: token ${GITEA_TOKEN}" \
             "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/tags/${TAG}" || true
 
           # Create the release
+          echo "Creating new nightly release..."
+          RELEASE_DATA="{\"tag_name\":\"${TAG}\",\"target_commitish\":\"${{ gitea.sha }}\",\"name\":\"Nightly Build\",\"body\":\"Automated nightly build. Experimental and unstable.\\nLast Updated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')\\nCommit: ${{ gitea.sha }}\",\"draft\":false,\"prerelease\":true}"
+          
           RELEASE=$(curl -s -X POST \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \
             "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases" \
-            -d "{
-              \"tag_name\": \"${TAG}\",
-              \"target_commitish\": \"${{ gitea.sha }}\",
-              \"name\": \"Nightly Build\",
-              \"body\": \"Automated nightly build. Experimental and unstable.\nLast Updated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')\nCommit: ${{ gitea.sha }}\",
-              \"draft\": false,
-              \"prerelease\": true
-            }")
+            -d "$RELEASE_DATA")
 
-          RELEASE_ID=$(echo "$RELEASE" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          RELEASE_ID=$(echo "$RELEASE" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2 || true)
+          
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" == "null" ]; then
+            echo "Failed to create release. Response:"
+            echo "$RELEASE"
+            exit 1
+          fi
+          
           echo "Created nightly release ID: $RELEASE_ID"
 
           # Upload Assets
-          for file in artifacts/**/*; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename..."
-              curl -s -X POST \
-                -H "Authorization: token ${GITEA_TOKEN}" \
-                -H "Content-Type: application/octet-stream" \
-                "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${filename}" \
-                --data-binary @"$file"
-            fi
+          echo "Searching for artifacts in 'artifacts' directory..."
+          find artifacts -type f | while read file; do
+            filename=$(basename "$file")
+            echo "Uploading $filename from $file..."
+            UPLOAD_RESPONSE=$(curl -s -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${filename}" \
+              --data-binary @"$file")
+            echo "Upload response: $UPLOAD_RESPONSE"
           done
 
           echo "Nightly release updated."
