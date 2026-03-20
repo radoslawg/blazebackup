@@ -10,37 +10,48 @@ permissions:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.name }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            name: linux-x86_64
             artifact_name: blazebackup
             asset_name: blazebackup-linux-x86_64
-          - os: windows-latest
+          - target: x86_64-pc-windows-gnu
+            name: windows-x86_64
             artifact_name: blazebackup.exe
             asset_name: blazebackup-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (Nightly)
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
+          target: ${{ matrix.target }}
           override: true
           profile: minimal
 
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
+
+      - name: Install MinGW cross-compiler
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 mingw-w64
+
       - name: Build Project
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare Binary
         shell: bash
         run: |
           mkdir -p staging
-          cp target/release/${{ matrix.artifact_name }} staging/${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} staging/${{ matrix.asset_name }}
 
       - name: Upload Artifact
         uses: https://github.com/christopherHX/gitea-upload-artifact@v4
@@ -54,27 +65,61 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
-        uses: https://github.com/christopherHX/gitea-upload-artifact@v4/download-artifact
+        uses: https://github.com/christopherHX/gitea-download-artifact@v4/download-artifact
         with:
           path: artifacts
 
       - name: Create or Update Nightly Release
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_SERVER_URL: ${{ gitea.server_url }}
+          REPO: ${{ gitea.repository }}
         run: |
-          # Ensure tag exists locally to push
-          git tag -f nightly HEAD
-          git push -f origin nightly
+          TAG="nightly"
           
-          # Check if release exists
-          if gh release view nightly > /dev/null 2>&1; then
-            echo "Updating existing nightly release..."
-            gh release upload nightly artifacts/**/* --clobber
-          else
-            echo "Creating new nightly release..."
-            gh release create nightly artifacts/**/* \
-              --title "Nightly Build" \
-              --notes "Automated nightly build. Experimental and unstable." \
-              --prerelease
+          # Delete existing release if it exists
+          RELEASE_ID=$(curl -s -H "Authorization: token ${GITEA_TOKEN}" \
+            "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          
+          if [ ! -z "$RELEASE_ID" ]; then
+            echo "Deleting existing nightly release ID: $RELEASE_ID"
+            curl -s -X DELETE -H "Authorization: token ${GITEA_TOKEN}" \
+              "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}"
           fi
+          
+          # Delete tag if it exists
+          curl -s -X DELETE -H "Authorization: token ${GITEA_TOKEN}" \
+            "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/tags/${TAG}" || true
+
+          # Create the release
+          RELEASE=$(curl -s -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases" \
+            -d "{
+              \"tag_name\": \"${TAG}\",
+              \"target_commitish\": \"${{ gitea.sha }}\",
+              \"name\": \"Nightly Build\",
+              \"body\": \"Automated nightly build. Experimental and unstable.\nLast Updated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')\nCommit: ${{ gitea.sha }}\",
+              \"draft\": false,
+              \"prerelease\": true
+            }")
+
+          RELEASE_ID=$(echo "$RELEASE" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)
+          echo "Created nightly release ID: $RELEASE_ID"
+
+          # Upload Assets
+          for file in artifacts/**/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename..."
+              curl -s -X POST \
+                -H "Authorization: token ${GITEA_TOKEN}" \
+                -H "Content-Type: application/octet-stream" \
+                "${GITEA_SERVER_URL}/api/v1/repos/${REPO}/releases/${RELEASE_ID}/assets?name=${filename}" \
+                --data-binary @"$file"
+            fi
+          done
+
+          echo "Nightly release updated."
